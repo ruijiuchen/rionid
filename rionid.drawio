@@ -164,43 +164,54 @@
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-173" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-162" target="AuoDzLXZq2x2FkoKTNY2-163">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-174" value="Start ImportData&lt;div&gt;(inside rionid/importdata.py)&lt;/div&gt;" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1380" y="45" width="170" height="60" as="geometry" />
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-186" value="Start _simulated_data()" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="50" width="140" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-175" value="__init__():\n- Parse refion and alphap\n- Initialize Ring\n- Setup ref_charge and ref_aa\n- Determine cache path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
-          <mxGeometry x="1360" y="125" width="220" height="100" as="geometry" />
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-187" value="Loop over harmonics:\nCalculate brho or use input brho" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="130" width="260" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-176" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-174" target="AuoDzLXZq2x2FkoKTNY2-175">
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-188" value="Initialize self.simulated_data_dict = {}" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="210" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-189" value="Set self.yield_data:\n - [1,1,...] if particles=True\n - From LISE otherwise" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="290" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-190" value="self.nuclei_names = list of ion names" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="380" width="260" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-191" value="Loop over harmonics:\n - Compute harmonic_frequency\n - stack(freq, yield, ion)\n - Save to self.simulated_data_dict" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="450" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-192" value="End _simulated_data()" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="570" width="140" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-193" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-186" target="AuoDzLXZq2x2FkoKTNY2-187">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-177" value="If filename: - reload_data=True: _get_experimental_data() and _save_experimental_data() - Else: _load_experimental_data()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
-          <mxGeometry x="1360" y="245" width="300" height="100" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-178" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-175" target="AuoDzLXZq2x2FkoKTNY2-177">
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-194" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-187" target="AuoDzLXZq2x2FkoKTNY2-188">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-179" value="_set_particles_to_simulate_from_file() _calculate_moqs() _calculate_srrf() _simulated_data()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;" vertex="1" parent="1">
-          <mxGeometry x="1360" y="365" width="300" height="120" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-180" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-177" target="AuoDzLXZq2x2FkoKTNY2-179">
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-195" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-188" target="AuoDzLXZq2x2FkoKTNY2-189">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-181" value="Helper functions: - calculate_brho_relativistic() - reference_frequency() - calc_ref_rev_frequency() - gamma_brho(), gamma_ke() - beta(), velocity()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
-          <mxGeometry x="1700" y="365" width="280" height="120" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-182" style="endArrow=open;dashed=1;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-179" target="AuoDzLXZq2x2FkoKTNY2-181">
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-196" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-189" target="AuoDzLXZq2x2FkoKTNY2-190">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-183" value="Done (ImportData ready)" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1440" y="525" width="140" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-184" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-179" target="AuoDzLXZq2x2FkoKTNY2-183">
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-197" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-190" target="AuoDzLXZq2x2FkoKTNY2-191">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-185" style="endArrow=block;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-156" target="AuoDzLXZq2x2FkoKTNY2-174">
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-198" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-191" target="AuoDzLXZq2x2FkoKTNY2-192">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-199" style="endArrow=block;dashed=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-160" target="AuoDzLXZq2x2FkoKTNY2-186">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="1280" y="340" as="sourcePoint" />
-            <mxPoint x="1341" y="80" as="targetPoint" />
+            <mxPoint x="1220" y="480" as="sourcePoint" />
+            <mxPoint x="1281" y="220" as="targetPoint" />
+            <Array as="points">
+              <mxPoint x="1270" y="650" />
+              <mxPoint x="1270" y="270" />
+              <mxPoint x="1270" y="80" />
+            </Array>
           </mxGeometry>
         </mxCell>
       </root>
