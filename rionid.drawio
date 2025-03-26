@@ -164,8 +164,8 @@
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-173" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-162" target="AuoDzLXZq2x2FkoKTNY2-163">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-174" value="Start ImportData" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1380" y="45" width="120" height="60" as="geometry" />
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-174" value="Start ImportData&lt;div&gt;(inside rionid/importdata.py)&lt;/div&gt;" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="1380" y="45" width="170" height="60" as="geometry" />
         </mxCell>
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-175" value="__init__():\n- Parse refion and alphap\n- Initialize Ring\n- Setup ref_charge and ref_aa\n- Determine cache path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
           <mxGeometry x="1360" y="125" width="220" height="100" as="geometry" />
