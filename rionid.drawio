@@ -114,7 +114,7 @@
           <mxGeometry x="981" y="300" width="220" height="60" as="geometry" />
         </mxCell>
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-157" value="mydata._set_particles_to_simulate_from_file(filep)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="981" y="380" width="260" height="60" as="geometry" />
+          <mxGeometry x="951.5" y="380" width="279" height="60" as="geometry" />
         </mxCell>
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-158" value="mydata._calculate_moqs()" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="981" y="460" width="220" height="60" as="geometry" />
