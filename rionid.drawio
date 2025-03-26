@@ -1,6 +1,6 @@
 <mxfile host="app.diagrams.net" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 Edg/134.0.0.0" version="26.1.3">
   <diagram name="main()" id="aO4VV1BkPGHHD6uGdVux">
-    <mxGraphModel dx="1207" dy="1758" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="977" dy="1646" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -62,36 +62,6 @@
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="728.3333333333333" y="220" as="targetPoint" />
           </mxGeometry>
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-67" value="User clicks &#39;Run&#39; button" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1340" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-68" value="run_script()" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="80" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-69" value="Start ScriptThread(actual_run_script)" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="160" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-70" value="actual_run_script()" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="240" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-71" value="controller_pyqt(...)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="320" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-72" value="QApplication.postEvent(CustomEvent(data))" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="400" width="260" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-73" value="customEvent() receives data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="480" width="260" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-74" value="launch_visualization(data)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;" vertex="1" parent="1">
-          <mxGeometry x="1340" y="560" width="260" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-75" value="Run 按钮在 RionID_GUI 中" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
-          <mxGeometry x="1110" y="390" width="200" height="60" as="geometry" />
-        </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-76" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-75" target="AuoDzLXZq2x2FkoKTNY2-67">
-          <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-88" value="User clicks &#39;Run&#39; button" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="1">
           <mxGeometry x="970" y="-10" width="200" height="60" as="geometry" />
