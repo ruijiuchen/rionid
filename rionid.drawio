@@ -164,8 +164,8 @@
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-173" style="endArrow=block;" edge="1" parent="1" source="AuoDzLXZq2x2FkoKTNY2-162" target="AuoDzLXZq2x2FkoKTNY2-163">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="AuoDzLXZq2x2FkoKTNY2-186" value="Start _simulated_data()" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
-          <mxGeometry x="1370" y="50" width="140" height="60" as="geometry" />
+        <mxCell id="AuoDzLXZq2x2FkoKTNY2-186" value="Start _simulated_data()&lt;br&gt;(inside:rionid/importdata.py)" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="1355" y="40" width="170" height="72.86" as="geometry" />
         </mxCell>
         <mxCell id="AuoDzLXZq2x2FkoKTNY2-187" value="Loop over harmonics:\nCalculate brho or use input brho" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;" vertex="1" parent="1">
           <mxGeometry x="1310" y="130" width="260" height="60" as="geometry" />
