@@ -13,7 +13,7 @@ from scipy.signal import find_peaks, peak_widths
 import traceback
 from scipy.ndimage import gaussian_filter1d  # or use savgol_filter
 from scipy.signal import savgol_filter
-
+import re
 class ImportData(object):
     '''
     Model (MVC)
@@ -30,8 +30,7 @@ class ImportData(object):
         self.gammat = (1/(alphap))**0.5
         # Extra objects
         self.ring = Ring('ESR', circumference)
-        self.ref_charge = int(refion[refion.index('+'):])
-        self.ref_aa = int(re.split('(\d+)', refion)[1])
+        self.ref_aa, self.ref_element, self.ref_charge = self._parse_ion_name(refion)
         self.experimental_data = None
         self.brho = 0 
         self.peak_threshold_pct = float(peak_threshold_pct)
@@ -39,6 +38,7 @@ class ImportData(object):
         self.peak_widths_freq = []
         self.peak_heights = []
         self.gammats = []
+        self.yield_data=[]
         # Data cache file path
         self.cache_file = self._get_cache_file_path(filename)
         self.chi2= 0
@@ -56,7 +56,25 @@ class ImportData(object):
         else:
             print("No experimental data file provided. Using default or simulated data.")
             self.experimental_data = None  # Set empty or simulated data here
+        
+    def _parse_ion_name(self, refion):
+        """
+        Parse an ion name to extract mass number, element symbol, and charge.
 
+        Args:
+            refion (str): Ion name in the format '<mass><element><charge>+', e.g., '205Tl81+'
+
+        Returns:
+            tuple: (mass_number: int, element_symbol: str, charge: int)
+
+        Raises:
+            ValueError: if the ion name format is invalid
+        """
+        match = re.match(r'^(\d+)([A-Za-z]+)(\d+)\+$', refion)
+        if not match:
+            raise ValueError(f"Invalid ion name format: {refion}")
+        return int(match.group(1)), match.group(2), int(match.group(3))
+        
     def compute_matches(self,
                         match_threshold,
                         match_frequency_min=None,
@@ -299,37 +317,35 @@ class ImportData(object):
         # Calculate the  moq from barion of the particles present in LISE file or of the particles introduced
         if particles:
              for particle in particles:
-                 ion_name = f'{particle.tbl_aa}{particle.tbl_name}+{particle.qq}'
+                 ion_name = f'{particle.tbl_aa}{particle.tbl_name}{particle.qq}+'
                  m_q = particle.get_ionic_moq_in_u()
                  self.moq[ion_name] = m_q
                  self.total_mass[ion_name] = m_q * particle.qq  # Calculate and store the total mass
         else:
              for particle in self.particles_to_simulate:
-                 ion_name = f'{particle[1]}{particle[0]}+{particle[4][0]}'
+                 ion_name = f'{particle[1]}{particle[0]}{particle[4][-1]}+'
                  for ame in self.ame_data:
                      if particle[0] == ame[6] and particle[1] == ame[5]:
                          pp = Particle(particle[2], particle[3], self.ame, self.ring)
-                         pp.qq = particle[4][0]
+                         pp.qq = particle[4][-1]
                          m_q = pp.get_ionic_moq_in_u()
                          self.moq[ion_name] = m_q
                          self.total_mass[ion_name] = m_q * pp.qq  # Calculate and store the total mass
-
+                         break  # ✅ Exit the for-loop once a match is found
+                         
     def _calculate_srrf(self, moqs = None, fref = None, brho = None, ke = None, gam = None, correct = None):
         if moqs:
             self.moq = moqs
-        
         self.ref_mass = AMEData.to_mev(self.moq[self.ref_ion] * self.ref_charge)
         self.ref_frequency = self.reference_frequency(fref = fref, brho = brho, ke = ke, gam = gam)
-        
         # Simulated relative revolution frequencies (respect to the reference particle)
         self.srrf = array([1 - self.alphap * (self.moq[name] - self.moq[self.ref_ion]) / self.moq[self.ref_ion]
                            for name in self.moq])
         if correct:
             self.srrf = self.srrf + polyval(array(correct), self.srrf * self.ref_frequency) / self.ref_frequency
-
             
     def build_ion_name(self,p):
-        return f"{int(p[1])}{p[0]}+{int(p[4][-1])}"
+        return f"{int(p[1])}{p[0]}{int(p[4][-1])}+"
         
     def _simulated_data(self, brho = None, harmonics = None, particles = False,mode = None, sim_scalingfactor = None, nions = None):
        for harmonic in harmonics:
@@ -343,19 +359,27 @@ class ImportData(object):
        # Dictionary with the simulated meassured frecuency and expected yield, for each harmonic
        self.simulated_data_dict = dict()
        moq_keys = list(self.moq.keys())
-       self.yield_data = array([
-           next((p[5] for p in self.particles_to_simulate if self.build_ion_name(p) == key), 0)
-           for key in moq_keys
-       ])
+       
+       for key in moq_keys:
+           found = False
+           
+           for p in self.particles_to_simulate:
+               ion_name = self.build_ion_name(p)
+               
+               if ion_name == key:
+                   yield_val = p[5]
+                   self.yield_data.append(yield_val)
+                   found = True
+                   break
+                   
        self.nuclei_names = array(moq_keys)
        # We normalize the yield to avoid problems with ranges and printing
-       #yield_data = [yieldd / max(yield_data) for yieldd in yield_data]
        # If a scaling factor is provided, multiply yield_data by scalingfactor
+       self.yield_data = np.array(self.yield_data, dtype=float)
        if sim_scalingfactor is not None:
-           self.yield_data = self.yield_data.astype(float) 
+           
            self.yield_data *= sim_scalingfactor
        # Get nuclei name for labels
-       #self.nuclei_names = array([nuclei_name for nuclei_name in self.moq])
        # Simulate the expected measured frequency for each harmonic:
        for harmonic in harmonics:
            simulated_data = array([])
@@ -375,6 +399,7 @@ class ImportData(object):
            simulated_data = simulated_data.reshape(len(array_stack), 3)
            name = f'{harmonic}'
            self.simulated_data_dict[name] = simulated_data
+           
     def calculate_brho_relativistic(self, moq, frequency, circumference, harmonic):
         """
             Calculate the relativistic magnetic rigidity (Bρ) of an ion.

@@ -4,6 +4,8 @@ from rionid.importdata import ImportData
 from barion.amedata import AMEData
 import time
 import numpy as np
+from PyQt5.QtWidgets import QMessageBox
+
 def import_controller(datafile=None, filep=None, alphap=None, refion=None, highlight_ions=None, harmonics = None, nions = None, amplitude=None, circumference = None, mode=None, sim_scalingfactor=None, value=None, reload_data=None,peak_threshold_pct = None,min_distance=None,output_results=None,saved_data = None,matching_freq_min=None,matching_freq_max=None,simulation_result=None):
     try:
         start_time = time.time()  # Record start time for each test_alphap iteration
@@ -47,6 +49,8 @@ def import_controller(datafile=None, filep=None, alphap=None, refion=None, highl
         return mydata # Returns the simulated spectrum data 
     except Exception as e:
         print(f"Error during calculations: {str(e)}")
+        # ✅ Show error dialog
+        QMessageBox.critical(None,"Error",f"An error occurred: {str(e)}")
         return None
 
 def display_nions(nions, yield_data, nuclei_names, simulated_data_dict, ref_ion, harmonics):
