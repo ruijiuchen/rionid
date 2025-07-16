@@ -5,6 +5,8 @@ from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QWidget, QPu
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import QLoggingCategory, Qt
 from PyQt5.QtCore import QEvent, pyqtSignal
+from pyqtgraph.exporters import ImageExporter
+from PyQt5 import QtGui, QtWidgets
 
 class CreatePyGUI(QMainWindow):
     '''
@@ -48,7 +50,7 @@ class CreatePyGUI(QMainWindow):
         QLoggingCategory.setFilterRules('*.warning=false\n*.critical=false')
         # Create the plot widget
         self.plot_widget = pg.PlotWidget()
-        
+        self.plot_widget.setBackground('w')
         # Set logY to true
         self.plot_widget.plotItem.ctrl.logYCheck.setChecked(True)
 
@@ -294,7 +296,35 @@ class CreatePyGUI(QMainWindow):
             # Check the state of the LogY checkbox
             #logy_checked = self.plot_widget.plotItem.ctrl.logYCheck.isChecked()
             #print(f"LogY is {'enabled' if logy_checked else 'disabled'}")
-                                    
+
+    def save_plot_with_dialog(self):
+        options = QtWidgets.QFileDialog.Options()
+        filename, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+            None,
+            "Save Plot As...",
+            "",
+            "PNG Files (*.png);;PDF Files (*.pdf)",
+            options=options
+        )
+    
+        if filename:  
+            if filename.lower().endswith(".png") or "png" in selected_filter:
+                # 
+                exporter = ImageExporter(self.plot_widget.plotItem)
+                exporter.parameters()['width'] = 1600
+                exporter.export(filename)
+                print(f"Plot saved as PNG: {filename}")
+    
+            elif filename.lower().endswith(".pdf") or "pdf" in selected_filter:
+                # 
+                printer = QtGui.QPrinter()
+                printer.setOutputFormat(QtGui.QPrinter.PdfFormat)
+                printer.setOutputFileName(filename)
+                painter = QtGui.QPainter(printer)
+                self.plot_widget.render(painter)
+                painter.end()
+                print(f"Plot saved as PDF: {filename}")
+                
     def save_selected_data(self):
         selected_range = self.plot_widget.getViewBox().viewRange()[0]
         mask = (self.x_exp >= selected_range[0]) & (self.x_exp <= selected_range[1])
@@ -321,7 +351,7 @@ class CreatePyGUI(QMainWindow):
         button_layout.addWidget(toggle_button)
 
         save_button = QPushButton("Save Selected Data")
-        save_button.clicked.connect(self.save_selected_data)
+        save_button.clicked.connect(self.save_plot_with_dialog)
         save_button.setFont(font)
         button_layout.addWidget(save_button)
 

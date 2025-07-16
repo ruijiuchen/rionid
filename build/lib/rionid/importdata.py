@@ -227,7 +227,6 @@ class ImportData(object):
                 self.experimental_data = handle_spectrumnpz_data(filename)
             else:
                 self.experimental_data = handle_tiqnpz_data(filename)
-        
         self.detect_peaks_and_widths()
         
     def detect_peaks_and_widths(self):
