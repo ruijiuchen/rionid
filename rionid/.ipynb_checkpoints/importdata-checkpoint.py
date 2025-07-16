@@ -14,11 +14,14 @@ import traceback
 from scipy.ndimage import gaussian_filter1d  # or use savgol_filter
 from scipy.signal import savgol_filter
 import re
+# add 2025/7/16 15:21
+from .nonparams_est import NONPARAMS_EST
+
 class ImportData(object):
     '''
     Model (MVC)
     '''
-    def __init__(self, refion, highlight_ions, alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None):
+    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l,alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None):
         self.simulated_data_dict = {}  # Make sure this is initialized
         # Argparser arguments
         self.particles_to_simulate = []  # Default to an empty list
@@ -46,6 +49,10 @@ class ImportData(object):
         self.min_distance=min_distance
         self.matching_freq_min=matching_freq_min
         self.matching_freq_max=matching_freq_max
+        self.remove_baseline = remove_baseline
+        self.psd_baseline_removed_l=psd_baseline_removed_l
+        self.psd_baseline_removed_ratio=1e-6
+        
         # Get the experimental data
         if filename is not None:
             if reload_data:
@@ -227,7 +234,24 @@ class ImportData(object):
                 self.experimental_data = handle_spectrumnpz_data(filename)
             else:
                 self.experimental_data = handle_tiqnpz_data(filename)
-        
+                
+         # remove baseline or not.
+        if self.remove_baseline:
+            try:
+                if self.experimental_data is not None and len(self.experimental_data) == 2:
+                    freq, psd = self.experimental_data
+                    baseline = NONPARAMS_EST(psd).pls('BrPLS', l=self.psd_baseline_removed_l, ratio=self.psd_baseline_removed_ratio)
+                    psd_baseline_removed = psd - baseline
+                    self.psd_baseline_removed = (freq, psd_baseline_removed)
+                    self.experimental_data = (freq, psd_baseline_removed)
+                    print("✅ Baseline removal completed. Result stored in self.psd_baseline_removed.")
+                else:
+                    print("⚠️ Invalid format of self.experimental_data. Skipping baseline removal.")
+            except Exception as e:
+                print("❌ Baseline removal failed:", e)
+                traceback.print_exc()
+
+    
         self.detect_peaks_and_widths()
         
     def detect_peaks_and_widths(self):
@@ -235,23 +259,17 @@ class ImportData(object):
             return
     
         freq, amp = self.experimental_data
-        baseline = savgol_filter(amp, window_length=201, polyorder=3)
-        baseline_min   = np.mean(baseline)
-        amp_corr = amp - baseline_min
-        #self.experimental_data = (freq, amp_corr)
-        # 1) (Optional) smooth the amplitude to suppress high-freq noise
-        amp_smooth = gaussian_filter1d(amp_corr, sigma=2)
     
         # 2) set up your thresholds
         rel_height = max(0.0, min(self.peak_threshold_pct, 1.0))
-        height_thresh = np.max(amp) * rel_height - baseline_min
+        height_thresh = np.max(amp) * rel_height
         min_dist    = float(self.min_distance)
         min_prom    = height_thresh * 0.3      # e.g. at least 30% of your threshold
         min_w       = 2                         # in samples, adjust to reject narrow spikes
         
         # 3) call find_peaks with prominence and minimum width
         peaks, props = find_peaks(
-            amp_smooth,
+            amp,
             height=height_thresh,
             distance=min_dist,
             prominence=min_prom,
@@ -260,7 +278,7 @@ class ImportData(object):
     
         # 4) measure “true” half-height widths on the smoothed data
         widths, width_heights, left_ips, right_ips = peak_widths(
-            amp_smooth, peaks, rel_height=0.5
+            amp, peaks, rel_height=0.5
         )
         
         # — apply matching_freq_min / matching_freq_max window —

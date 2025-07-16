@@ -42,6 +42,8 @@ class RionID_GUI(QWidget):
                 parameters = toml.load(f)
                 self.datafile_edit.setText(parameters.get('datafile', ''))
                 self.filep_edit.setText(parameters.get('filep', ''))
+                self.remove_baseline_checkbox.setChecked(parameters.get('remove_baseline', True))
+                self.psd_baseline_removed_l_edit.setText(parameters.get('psd_baseline_removed_l', ''))
                 self.alphap_edit.setText(parameters.get('alphap', ''))
                 self.alphap_min_edit.setText(parameters.get('alphap_min', ''))
                 self.alphap_max_edit.setText(parameters.get('alphap_max', ''))
@@ -71,6 +73,8 @@ class RionID_GUI(QWidget):
         parameters = {
             'datafile': self.datafile_edit.text(),
             'filep': self.filep_edit.text(),
+            'remove_baseline_checkbox': self.remove_baseline_checkbox.isChecked(),
+            'psd_baseline_removed_l': self.psd_baseline_removed_l_edit.text(),
             'alphap': self.alphap_edit.text(),
             'alphap_min': self.alphap_min_edit.text(),
             'alphap_max': self.alphap_max_edit.text(),
@@ -181,16 +185,27 @@ class RionID_GUI(QWidget):
         
     def setup_parameters(self):
         
+        # Is the experimental data reloaded?
+        self.reload_data_checkbox = QCheckBox('Reload Experimental Data')
+        self.reload_data_checkbox.setFont(common_font)
+        self.reload_data_checkbox.setChecked(True)
+    
+        # Is the experimental data reloaded?
+        self.remove_baseline_checkbox = QCheckBox('Remove baseline(Q. Wang et al. NUCL SCI TECH, 33: 148 (2022).)')
+        self.remove_baseline_checkbox.setFont(common_font)
+        self.remove_baseline_checkbox.setChecked(True)
+        
+        # psd_baseline_removed_l estimate parameters input
+        self.psd_baseline_removed_l_label = QLabel('l(e.g. 1000000):')
+        self.psd_baseline_removed_l_edit = QLineEdit()
+        self.psd_baseline_removed_l_label.setFont(common_font)
+        self.psd_baseline_removed_l_edit.setFont(common_font)
+    
         # αₚ main input
         self.alphap_label = QLabel('<i>α<sub>p</sub> or γ<sub>t</sub> :</i>')
         self.alphap_edit = QLineEdit()
         self.alphap_label.setFont(common_font)
         self.alphap_edit.setFont(common_font)
-    
-        # Is the experimental data reloaded?
-        self.reload_data_checkbox = QCheckBox('Reload Experimental Data')
-        self.reload_data_checkbox.setFont(common_font)
-        self.reload_data_checkbox.setChecked(True)
     
         # The circumference of the storage ring
         self.circumference_label = QLabel('Circumference (m):')
@@ -229,13 +244,19 @@ class RionID_GUI(QWidget):
         self.value_label = QLabel('Value:')
         self.value_edit = QLineEdit()
             
-        # Overload, Quick PID, αₚ main input
+        # psd_baseline_removed_l parameters input
         self.vbox.addWidget(self.reload_data_checkbox)
+        self.vbox.addWidget(self.remove_baseline_checkbox)
+        hbox_psd_baseline_removed_l = QHBoxLayout()
+        hbox_psd_baseline_removed_l.addWidget(self.psd_baseline_removed_l_label)
+        hbox_psd_baseline_removed_l.addWidget(self.psd_baseline_removed_l_edit)
+        self.vbox.addLayout(hbox_psd_baseline_removed_l)
+
         hbox_alphap = QHBoxLayout()
         hbox_alphap.addWidget(self.alphap_label)
         hbox_alphap.addWidget(self.alphap_edit)
         self.vbox.addLayout(hbox_alphap)
-    
+
         # circumference
         hbox_circ = QHBoxLayout()
         hbox_circ.addWidget(self.circumference_label)
@@ -537,6 +558,8 @@ class RionID_GUI(QWidget):
             #    raise ValueError("No experimental data provided. Please enter any filename and click Run, the program will automatically calculate the simulated data.")
 
             filep = self.filep_edit.text()
+            remove_baseline = self.remove_baseline_checkbox.isChecked()
+            psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
             alphap = float(self.alphap_edit.text())
             peak_threshold_pct = float(self.peak_thresh_edit.text())
             min_distance = float(self.min_distance_edit.text())
@@ -565,6 +588,8 @@ class RionID_GUI(QWidget):
 
             args = argparse.Namespace(datafile=datafile,
                                         filep=filep or None,
+                                        remove_baseline = remove_baseline or None,
+                                        psd_baseline_removed_l=psd_baseline_removed_l or None,
                                         alphap=alphap or None,
                                         harmonics=harmonics or None,
                                         refion=refion or None,
@@ -612,6 +637,8 @@ class RionID_GUI(QWidget):
 
             # --- collect constant arguments once ---
             filep = self.filep_edit.text() or None
+            remove_baseline = self.remove_baseline_checkbox.isChecked()
+            psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
             alphap = float(self.alphap_edit.text())
             peak_threshold_pct = float(self.peak_thresh_edit.text())
             min_distance = float(self.min_distance_edit.text())
@@ -644,6 +671,8 @@ class RionID_GUI(QWidget):
             model = ImportData(
                 refion=refion,
                 highlight_ions=highlight_ions,
+                remove_baseline = remove_baseline or None,
+                psd_baseline_removed_l=psd_baseline_removed_l or None,
                 alphap=alphap,
                 filename=datafile,
                 reload_data=reload_data,
@@ -723,6 +752,8 @@ class RionID_GUI(QWidget):
                     sim_args = argparse.Namespace(
                         datafile=datafile,
                         filep=filep,
+                        remove_baseline = remove_baseline,
+                        psd_baseline_removed_l = psd_baseline_removed_l,
                         alphap=test_alphap,
                         harmonics=harmonics,
                         refion=refion,
@@ -763,6 +794,8 @@ class RionID_GUI(QWidget):
                 sim_args = argparse.Namespace(
                     datafile=datafile,
                     filep=filep,
+                    remove_baseline = remove_baseline,
+                    psd_baseline_removed_l = psd_baseline_removed_l,
                     alphap=best_alphap,
                     harmonics=harmonics,
                     refion=refion,
@@ -792,15 +825,13 @@ class RionID_GUI(QWidget):
                 self.alphap_edit.setText(f"{best_alphap:.6f}")
                 self.overlay_sim_signal.emit(best_data)
                 QApplication.processEvents()
-                
                 # after inner loop, restore alphap style
                 self.alphap_edit.setStyleSheet(orig_alpha_style)
                 
                 # after outer loop, restore value style
             self.value_edit.setStyleSheet(orig_value_style)
             self.save_parameters()  # Save parameters before running the script
-            
-            
+
         except Exception as e:
             # On any error, also ensure any highlight is reset if needed
             QMessageBox.critical(self, "Quick PID Error", str(e))
