@@ -294,33 +294,40 @@ class PLS(object):
             w = wt
         return z
 
-    def BrPLS(self, l, ratio=1e-6, nitermax=50):
+    def BrPLS(self, l, ratio=1e-6, nitermax=50, z_init=None):
         '''
         Bayesian Asymmetrically reweighted penalized least squares (BrPLS)
         @ Q. Wang, X.L Yan, et al. NUCL SCI TECH, 33: 148 (2022). doi: 10.1007/s41365-022-01132-9
         ---
         l:          parameter for smoothness
         ratio:      parameter for termination condition ratio 
-        nitermax:   max number of iterations, default to 10
+        nitermax:   max number of iterations
+        z_init:     optional, initial value of baseline (np.array), can speed up convergence
         ---
         return
         z:          baseline spectrum
         '''
         L, beta = len(self.data), 0.5
-        D = sparse.diags([1,-2,1], [0,-1,-2], shape=(L, L-2))
+        D = sparse.diags([1, -2, 1], [0, -1, -2], shape=(L, L-2))
         D = l * D.dot(D.transpose())
-        w, z = np.ones(L), self.data.copy()
+        w = np.ones(L)
+        z = z_init.copy() if z_init is not None else self.data.copy()
         warnings.filterwarnings("ignore")
-        for i in range(nitermax):
-            for i in range(nitermax):
+        for _ in range(nitermax):
+            for _ in range(nitermax):
                 W = sparse.spdiags(w, 0, L, L)
                 Z = W + D
-                zt = spsolve(Z, w*self.data)
+                zt = spsolve(Z, w * self.data)
                 d = self.data - zt
-                d_m, d_sigma = np.mean(d[d>0]), np.sqrt(np.mean(d[d<0]**2)) 
-                w = 1 / (1 + beta / (1 - beta) * np.sqrt(np.pi / 2) * d_sigma / d_m * (1 + sp.erf((d / d_sigma - d_sigma / d_m) / np.sqrt(2))) * np.exp((d / d_sigma - d_sigma / d_m)**2 / 2))
-                if np.sqrt(np.sum((z - zt)**2) / np.sum(z**2)) < ratio: break
+                d_m = np.mean(d[d > 0]) if np.any(d > 0) else 1e-6
+                d_sigma = np.sqrt(np.mean(d[d < 0]**2)) if np.any(d < 0) else 1e-6
+                w = 1 / (1 + beta / (1 - beta) * np.sqrt(np.pi / 2) * d_sigma / d_m *
+                         (1 + sp.erf((d / d_sigma - d_sigma / d_m) / np.sqrt(2))) *
+                         np.exp((d / d_sigma - d_sigma / d_m)**2 / 2))
+                if np.sqrt(np.sum((z - zt)**2) / np.sum(z**2)) < ratio:
+                    break
                 z = zt
-            if np.abs(beta + np.mean(w) - 1.) < ratio: break
+            if np.abs(beta + np.mean(w) - 1.) < ratio:
+                break
             beta = 1 - np.mean(w)
         return z

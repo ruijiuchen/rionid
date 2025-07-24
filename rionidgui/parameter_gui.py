@@ -66,6 +66,8 @@ class RionID_GUI(QWidget):
                 self.nions_edit.setText(parameters.get('nions', ''))
                 self.simulation_result_edit.setText(parameters.get('simulation_result', ''))
                 self.matched_result_edit.setText(parameters.get('matched_result', ''))
+                self.saved_data=None
+                
         except FileNotFoundError:
             pass  # No parameters file exists yet
 
@@ -603,6 +605,7 @@ class RionID_GUI(QWidget):
                                         peak_threshold_pct=peak_threshold_pct,
                                         min_distance = min_distance,
                                         output_results=True,
+                                        saved_data=self.saved_data,
                                         matching_freq_min=matching_freq_min,
                                         matching_freq_max=matching_freq_max,
                                         simulation_result=simulation_result
@@ -610,6 +613,7 @@ class RionID_GUI(QWidget):
             self.save_parameters()  # Save parameters before running the script
             # Simulate controller execution and emit data
             data = import_controller(**vars(args))
+            self.saved_data = data
             if data.experimental_data:
                 best_chi2, best_match_count, best_match_ions = data.compute_matches(threshold,matching_freq_min,matching_freq_max)
                 data.save_matched_result(matched_result)
@@ -724,7 +728,6 @@ class RionID_GUI(QWidget):
             reload_data = True
             # Initialize first iteration flag
             first_iteration = True
-            saved_data = None  # Variable to save the first particles_to_simulate
             for f_ref in exp_peaks_hz_filtering:
                 QApplication.processEvents()
                 if self._stop_quick_pid:
@@ -767,7 +770,7 @@ class RionID_GUI(QWidget):
                         peak_threshold_pct=peak_threshold_pct,
                         min_distance=min_distance,
                         output_results=False,
-                        saved_data=saved_data,
+                        saved_data=self.saved_data,
                         matching_freq_min=matching_freq_min,
                         matching_freq_max=matching_freq_max,
                         simulation_result=simulation_result
@@ -779,8 +782,8 @@ class RionID_GUI(QWidget):
                     chi2, match_count, highlights = data_i.compute_matches(threshold,matching_freq_min,matching_freq_max)
                     results.append((f_ref, test_alphap, chi2, match_count,highlights))
                     if first_iteration:
-                        saved_data = data_i
-                        self.overlay_sim_signal.emit(saved_data)
+                        self.saved_data = data_i
+                        self.overlay_sim_signal.emit(self.saved_data)
                         first_iteration = False  # Set flag to False after the first iteration
                     else:
                         reload_data = False
@@ -809,7 +812,7 @@ class RionID_GUI(QWidget):
                     peak_threshold_pct=peak_threshold_pct,
                     min_distance=min_distance,
                     output_results=True,
-                    saved_data=saved_data,
+                    saved_data=self.saved_data,
                     matching_freq_min=matching_freq_min,
                     matching_freq_max=matching_freq_max,
                     simulation_result=simulation_result

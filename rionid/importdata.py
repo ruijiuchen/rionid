@@ -229,6 +229,8 @@ class ImportData(object):
             self.experimental_data = handle_read_rsa_specan_xml(filename)
         if file_extension.lower() == '.Specan':
             self.experimental_data = handle_read_rsa_specan_xml(filename)
+        if file_extension.lower() == '.root':
+            self.experimental_data = handle_root_data(filename, 5,14,h2name="h2_baseline_removed")
         if file_extension.lower() == '.npz':
             if 'spectrum' in base:
                 self.experimental_data = handle_spectrumnpz_data(filename)
@@ -265,7 +267,7 @@ class ImportData(object):
         height_thresh = np.max(amp) * rel_height
         min_dist    = float(self.min_distance)
         min_prom    = height_thresh * 0.3      # e.g. at least 30% of your threshold
-        min_w       = 2                         # in samples, adjust to reject narrow spikes
+        min_w       = 1                         # in samples, adjust to reject narrow spikes
         
         # 3) call find_peaks with prominence and minimum width
         peaks, props = find_peaks(

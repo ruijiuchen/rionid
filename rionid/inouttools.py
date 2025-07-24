@@ -1,7 +1,7 @@
 from iqtools.tools import read_rsa_specan_xml, read_rsa_data_csv, read_rsa_result_csv
 import numpy as np
 import os
-
+import ROOT
 def read_tdsm_bin(path):
     base_path, _ = os.path.splitext(path)
     bin_fre_path = os.path.join(base_path + '.bin_fre')
@@ -54,8 +54,9 @@ def handle_read_rsa_result_csv(filename):
 
 def handle_tiqnpz_data(filename):
     data = np.load(filename)
-    frequency = data['arr_0'].flatten()
-    amplitude = data['arr_2']
+    frequency = data['freq'].flatten()
+    
+    amplitude = data['spectrogram_db']
     amplitude_average = np.average(amplitude[5:,:], axis=0)
     return frequency, amplitude_average
 
@@ -64,7 +65,32 @@ def handle_spectrumnpz_data(filename):
     frequency = data['arr_0'].flatten()
     amplitude = data['arr_1']
     return frequency, amplitude
+    
+def handle_root_data(filename, y1, y2, h2name="h2_baseline_removed"):
+    # 打开 ROOT 文件
+    f = ROOT.TFile.Open(filename)
+    if not f or f.IsZombie():
+        raise IOError(f"Cannot open file: {filename}")
 
+    h2 = f.Get(h2name)
+    if not h2:
+        raise ValueError(f"Histogram '{h2name}' not found in file.")
+
+    # 获取 y 的 bin index 范围
+    y_bin_min = h2.GetYaxis().FindBin(y1)
+    y_bin_max = h2.GetYaxis().FindBin(y2)
+
+    # 向 x 投影，限制 y 的范围
+    h_proj = h2.ProjectionX("_px", y_bin_min, y_bin_max)
+
+    # 提取 bin 中心（频率）和内容（amplitude）
+    nbins = h_proj.GetNbinsX()
+    frequency = np.array([h_proj.GetBinCenter(i+1) for i in range(nbins)])
+    amplitude = np.array([h_proj.GetBinContent(i+1) for i in range(nbins)])
+
+    f.Close()
+    return frequency*1e6, amplitude
+    
 def handle_prerionidnpz_data(filename):
     data = np.load(filename)
     frequency = data['x']
