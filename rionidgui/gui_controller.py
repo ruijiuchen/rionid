@@ -27,6 +27,7 @@ def import_controller(datafile=None, filep=None, remove_baseline = None, psd_bas
             mydata.ame = saved_data.ame
             mydata.ame_data = saved_data.ame_data
             mydata.particles_to_simulate = saved_data.particles_to_simulate
+            mydata.protons = saved_data.protons
             mydata.moq = saved_data.moq
             mydata.total_mass = saved_data.total_mass
             mydata.peak_freqs = saved_data.peak_freqs
@@ -91,12 +92,17 @@ def save_simulation_results(mydata, mode, harmonics, sort_index, filename = 'sim
         # Writing the sorted simulation results
         for i in sort_index:
             ion = mydata.nuclei_names[i]
-            if mode == 'Frequency': fre = mydata.srrf[i] * mydata.ref_frequency
-            elif mode == 'Bρ': fre = mydata.srrf[i] * mydata.ref_frequency*harmonic
-            yield_ = mydata.yield_data[i]
-            moq = mydata.moq[ion]
-            mass_u = mydata.total_mass[ion]
-            mass = AMEData.to_mev(mass_u) * 1e6
-            result_line = f"{ion:<15}{fre:<30.10f}{yield_:<15.4e}{moq:<15.12f}{mass:<15.3f}"
-            logger.info(result_line)
-            file.write(result_line + '\n')
+            fre = None  # Initialize fre as None
+            if mode == 'Frequency': 
+                fre = mydata.srrf[i] * mydata.ref_frequency
+            elif mode == 'Bρ': 
+                fre = mydata.srrf[i] * mydata.ref_frequency*harmonic
+            # Only proceed if fre is not None
+            if fre is not None:
+                yield_ = mydata.yield_data[i]
+                moq = mydata.moq[ion]
+                mass_u = mydata.total_mass[ion]
+                mass = AMEData.to_mev(mass_u) * 1e6
+                result_line = f"{ion:<15}{fre:<30.10f}{yield_:<15.4e}{moq:<15.12f}{mass:<15.3f}"
+                logger.info(result_line)
+                file.write(result_line + '\n')

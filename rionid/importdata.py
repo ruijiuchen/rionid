@@ -24,7 +24,9 @@ class ImportData(object):
     def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l,alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None):
         self.simulated_data_dict = {}  # Make sure this is initialized
         # Argparser arguments
+        self.harmonics=[]
         self.particles_to_simulate = []  # Default to an empty list
+        self.protons = dict()
         self.moq = dict()
         self.total_mass = dict()  # Initialize the total mass dictionary
         self.ref_ion = refion
@@ -195,7 +197,7 @@ class ImportData(object):
         with open(output_file, 'w', newline='') as f:
             f.write('ion_name,sim_freq[Hz],exp_freq[Hz],'
                     'peak_width[Hz],peak_height,'
-                    'm/q,gamma_t\n')
+                    'm/q,gamma_t,HN,RevT_sim,RevT_exp,RevT_exp_sim,sigma_RevT,Nuclei,Z,Q,Flag,T(ps),Count,SigmaT(ps),TError(ps)\n')
             for ion, sim_f, exp_f, w, h, gt in zip(
                 self.matched_ions,
                 self.matched_sim_freqs,
@@ -205,9 +207,19 @@ class ImportData(object):
                 self.gammats
             ):
                 moq = self.moq[ion]
+                HN = self.harmonics[0]
+                RevT_sim = 1e12/(sim_f/HN)
+                RevT_exp = 1e12/(exp_f/HN)
+                RevT_exp_sim = RevT_exp - RevT_sim
+                sigma_RevT = w/2.35/exp_f * RevT_exp
+                match = re.match(r'(\d+)([A-Za-z]+)(\d+)\+', ion)
+                proton = self.protons[ion]
+                if match:
+                    mass, elem, charge = match.groups()
+                Flag = "Y"
                 f.write(f"{ion},{sim_f:.2f},{exp_f:.2f},"
                         f"{w:.2f},{h:.6f},"
-                        f"{moq:.12f},{gt:.6f}\n")
+                        f"{moq:.12f},{gt:.6f},{HN:.0f},{RevT_sim:.2f},{RevT_exp:.2f},{RevT_exp_sim:.2f},{sigma_RevT:.2f},{mass}{elem},{proton:.0f},{float(charge):.0f},{Flag},{RevT_exp:.2f},{h:.6f},{sigma_RevT:.2f},{sigma_RevT/sqrt(h):.2f}\n")
     
         print(f"Detailed match data saved to '{output_file}'")
         return self.gammats
@@ -346,10 +358,12 @@ class ImportData(object):
              for particle in self.particles_to_simulate:
                  ion_name = f'{particle[1]}{particle[0]}{particle[4][-1]}+'
                  for ame in self.ame_data:
+                     #print("chenrj ame= ",ame)
                      if particle[0] == ame[6] and particle[1] == ame[5]:
                          pp = Particle(particle[2], particle[3], self.ame, self.ring)
                          pp.qq = particle[4][-1]
                          m_q = pp.get_ionic_moq_in_u()
+                         self.protons[ion_name] = ame[4]
                          self.moq[ion_name] = m_q
                          self.total_mass[ion_name] = m_q * pp.qq  # Calculate and store the total mass
                          break  # ✅ Exit the for-loop once a match is found
@@ -369,6 +383,7 @@ class ImportData(object):
         return f"{int(p[1])}{p[0]}{int(p[4][-1])}+"
         
     def _simulated_data(self, brho = None, harmonics = None, particles = False,mode = None, sim_scalingfactor = None, nions = None):
+       self.harmonics = harmonics
        for harmonic in harmonics:
            ref_moq = self.moq[self.ref_ion]
            if mode == 'Bρ':
