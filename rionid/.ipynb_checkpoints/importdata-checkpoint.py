@@ -102,11 +102,11 @@ class ImportData(object):
         """
         # Build list of (frequency, ion_name) from simulated_data_dict
         sim_items = []
-        for sdata in self.simulated_data_dict.values():
+        for harmonic_name, sdata in self.simulated_data_dict.items():
+            harmonic = int(float(harmonic_name))
             for row in sdata:
-                sim_items.append((float(row[0]), row[2]))
-        sim_freqs = np.array([freq for freq, _ in sim_items])
-    
+                sim_items.append((float(row[0]), row[2], harmonic))  # 添加 harmonic_name
+        sim_freqs = np.array([freq for freq, _, _ in sim_items])
         # Initialize accumulators
         chi2 = 0.0
         match_count = 0
@@ -198,16 +198,17 @@ class ImportData(object):
             f.write('ion_name,sim_freq[Hz],exp_freq[Hz],'
                     'peak_width[Hz],peak_height,'
                     'm/q,gamma_t,HN,RevT_sim,RevT_exp,RevT_exp_sim,sigma_RevT,Nuclei,Z,Q,Flag,T(ps),Count,SigmaT(ps),TError(ps)\n')
-            for ion, sim_f, exp_f, w, h, gt in zip(
+            for ion, sim_f, exp_f, w, h, gt, sim_item  in zip(
                 self.matched_ions,
                 self.matched_sim_freqs,
                 self.matched_exp_freqs,
                 self.matched_peak_widths,
                 self.matched_peak_heights,
-                self.gammats
+                self.gammats,
+                self.matched_sim_items
             ):
                 moq = self.moq[ion]
-                HN = self.harmonics[0]
+                HN = sim_item[2] 
                 RevT_sim = 1e12/(sim_f/HN)
                 RevT_exp = 1e12/(exp_f/HN)
                 RevT_exp_sim = RevT_exp - RevT_sim

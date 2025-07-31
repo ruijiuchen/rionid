@@ -7,6 +7,13 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import matplotlib.pyplot as plt
 
+#import ROOT
+#import numpy as np
+#from PyQt5.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, QPushButton, QLineEdit, QComboBox, QMessageBox
+#from matplotlib.figure import Figure
+#from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+#import matplotlib.pyplot as plt
+
 class KeySelectionDialog(QDialog):
     def __init__(self, parent=None, keys=None, filename=None):
         super().__init__(parent)
@@ -233,8 +240,161 @@ def handle_spectrumnpz_data(filename, parent=None):
     else:
         return None, None
         
-def handle_root_data(filename, y1, y2, h2name="h2_baseline_removed"):
-    # 打开 ROOT 文件
+
+class RootInputDialog(QDialog):
+    def __init__(self, parent=None, filename=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Parameters for ROOT File Processing")
+        self.filename = filename
+        self.colorbar = None  # To track the colorbar
+
+        # Set Matplotlib backend to Qt5Agg
+        plt.switch_backend('Qt5Agg')
+
+        # Main layout
+        main_layout = QVBoxLayout()
+
+        # Form layout for inputs
+        form_layout = QFormLayout()
+
+        self.h2name_combo = QComboBox()
+        self.y1_edit = QLineEdit()
+        self.y2_edit = QLineEdit()
+
+        # Try to load histogram names from the ROOT file
+        keys = self.get_histogram_keys()
+        if keys:
+            self.h2name_combo.addItems(keys)
+            if 'h2_baseline_removed' in keys:
+                self.h2name_combo.setCurrentText('h2_baseline_removed')
+
+        form_layout.addRow("Histogram Name:", self.h2name_combo)
+        form_layout.addRow("Y1 (min):", self.y1_edit)
+        form_layout.addRow("Y2 (max):", self.y2_edit)
+
+        # Buttons
+        buttons = QHBoxLayout()
+        self.preview_btn = QPushButton("Preview")
+        ok_btn = QPushButton("OK")
+        cancel_btn = QPushButton("Cancel")
+        buttons.addWidget(self.preview_btn)
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+
+        self.preview_btn.clicked.connect(self.preview_plot)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+        # Matplotlib canvas for preview
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)
+
+        # Combine layouts
+        main_layout.addLayout(form_layout)
+        main_layout.addWidget(self.canvas)
+        main_layout.addLayout(buttons)
+        self.setLayout(main_layout)
+
+    def get_histogram_keys(self):
+        """Retrieve available histogram names from the ROOT file."""
+        if not self.filename:
+            return []
+        try:
+            f = ROOT.TFile.Open(self.filename)
+            if not f or f.IsZombie():
+                return []
+            keys = [key.GetName() for key in f.GetListOfKeys() if key.GetClassName().startswith('TH')]
+            f.Close()
+            return keys
+        except:
+            return []
+
+    def preview_plot(self):
+        """Generate a preview plot of the projected histogram."""
+        if not self.filename:
+            QMessageBox.warning(self, "Error", "No filename provided for preview.")
+            return
+
+        try:
+            h2name = self.h2name_combo.currentText()
+            y1_str = self.y1_edit.text()
+            y2_str = self.y2_edit.text()
+
+            if not h2name:
+                raise ValueError("Histogram name must be selected.")
+            if not y1_str.strip() or not y2_str.strip():
+                raise ValueError("Y1 and Y2 must be provided.")
+
+            y1 = float(y1_str)
+            y2 = float(y2_str)
+
+            # Open ROOT file and get histogram
+            f = ROOT.TFile.Open(self.filename)
+            if not f or f.IsZombie():
+                raise IOError(f"Cannot open file: {self.filename}")
+
+            h2 = f.Get(h2name)
+            if not h2:
+                raise ValueError(f"Histogram '{h2name}' not found in file.")
+
+            # Get y bin index range
+            y_bin_min = h2.GetYaxis().FindBin(y1)
+            y_bin_max = h2.GetYaxis().FindBin(y2)
+
+            # Project to x, restricting y range
+            h_proj = h2.ProjectionX("_px", y_bin_min, y_bin_max)
+
+            # Extract bin centers (frequency) and contents (amplitude)
+            nbins = h_proj.GetNbinsX()
+            frequency = np.array([h_proj.GetBinCenter(i+1) for i in range(nbins)]) * 1e6  # Convert to MHz
+            amplitude = np.array([h_proj.GetBinContent(i+1) for i in range(nbins)])
+
+            # Clear the entire figure and recreate the subplot
+            self.figure.clf()
+            self.ax = self.figure.add_subplot(111)
+            self.colorbar = None  # Reset colorbar reference
+
+            # Plot the histogram projection
+            self.ax.plot(frequency, amplitude, label='Projected Histogram')
+            self.ax.set_xlabel('Frequency (MHz)')
+            self.ax.set_ylabel('Amplitude')
+            self.ax.set_title(f'Histogram Projection ({h2name}, y1={y1}, y2={y2})')
+            self.ax.legend()
+
+            # Redraw the canvas
+            self.canvas.draw()
+
+            f.Close()
+        except Exception as e:
+            QMessageBox.critical(self, "Preview Error", f"An error occurred during preview: {str(e)}")
+
+    def get_params(self):
+        """Return the selected parameters."""
+        return {
+            'h2name': self.h2name_combo.currentText(),
+            'y1': self.y1_edit.text(),
+            'y2': self.y2_edit.text()
+        }
+
+def handle_root_data(filename,y1, y2, h2name):
+    # Create and show the dialog
+    dialog = RootInputDialog(filename=filename)
+    if dialog.exec_() != QDialog.Accepted:
+        raise ValueError("Dialog cancelled by user.")
+
+    params = dialog.get_params()
+    try:
+        y1 = float(params['y1']) if params['y1'].strip() else None
+        y2 = float(params['y2']) if params['y2'].strip() else None
+        h2name = params['h2name'] or "h2_baseline_removed"
+    except ValueError:
+        raise ValueError("Invalid input for y1 or y2. Please enter valid numbers.")
+
+    if y1 is None or y2 is None:
+        raise ValueError("Y1 and Y2 must be provided.")
+
+    # Open ROOT file
     f = ROOT.TFile.Open(filename)
     if not f or f.IsZombie():
         raise IOError(f"Cannot open file: {filename}")
@@ -243,20 +403,20 @@ def handle_root_data(filename, y1, y2, h2name="h2_baseline_removed"):
     if not h2:
         raise ValueError(f"Histogram '{h2name}' not found in file.")
 
-    # 获取 y 的 bin index 范围
+    # Get y bin index range
     y_bin_min = h2.GetYaxis().FindBin(y1)
     y_bin_max = h2.GetYaxis().FindBin(y2)
 
-    # 向 x 投影，限制 y 的范围
+    # Project to x, restricting y range
     h_proj = h2.ProjectionX("_px", y_bin_min, y_bin_max)
 
-    # 提取 bin 中心（频率）和内容（amplitude）
+    # Extract bin centers (frequency) and contents (amplitude)
     nbins = h_proj.GetNbinsX()
     frequency = np.array([h_proj.GetBinCenter(i+1) for i in range(nbins)])
     amplitude = np.array([h_proj.GetBinContent(i+1) for i in range(nbins)])
 
     f.Close()
-    return frequency*1e6, amplitude
+    return frequency * 1e6, amplitude
     
 def handle_prerionidnpz_data(filename):
     data = np.load(filename)
