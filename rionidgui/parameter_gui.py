@@ -709,7 +709,7 @@ class RionID_GUI(QWidget):
             exp_peaks_hz = [f for f in model.peak_freqs]
             exp_peaks_hz_filtering = [f for f in model.peak_freqs if fref_min <= f <= fref_max]
             # Check if the list is empty after filtering
-            
+                
             if not exp_peaks_hz:
                 # If no peaks are found within the specified range, show an error message
                 QMessageBox.critical(self, "Error", "No experimental peaks found within the specified frequency range.\nPlease adjust the frequency range.")
@@ -728,6 +728,9 @@ class RionID_GUI(QWidget):
             reload_data = True
             # Initialize first iteration flag
             first_iteration = True
+        
+            #exp_peaks_hz_filtering.append(model.ref_frequency)    
+        
             for f_ref in exp_peaks_hz_filtering:
                 QApplication.processEvents()
                 if self._stop_quick_pid:

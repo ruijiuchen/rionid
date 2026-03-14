@@ -212,7 +212,7 @@ class CreatePyGUI(QMainWindow):
                     new_label = label
                 
                 # Vertical line
-                line = self.plot_widget.plot([freq, freq], [1e-10, z_value], pen=pg.mkPen(color=label_color, width=1, style=Qt.DashLine))
+                line = self.plot_widget.plot([freq, freq], [1e-30, z_value], pen=pg.mkPen(color=label_color, width=1, style=Qt.DashLine))
                 # Text label at top with adjustable font size
                 text = pg.TextItem(text=new_label, color=label_color, anchor=(0,0.5))
                 text.setFont(QFont("Arial", self.font_size))  # 新增: 使用 self.font_size 设置离子符号字体

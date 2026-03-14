@@ -54,7 +54,7 @@ class ImportData(object):
         self.remove_baseline = remove_baseline
         self.psd_baseline_removed_l=psd_baseline_removed_l
         self.psd_baseline_removed_ratio=1e-6
-        
+        self.ref_frequency=0
         # Get the experimental data
         if filename is not None:
             if reload_data:
@@ -436,7 +436,7 @@ class ImportData(object):
            simulated_data = simulated_data.reshape(len(array_stack), 3)
            name = f'{harmonic}'
            self.simulated_data_dict[name] = simulated_data
-           
+        
     def calculate_brho_relativistic(self, moq, frequency, circumference, harmonic):
         """
             Calculate the relativistic magnetic rigidity (Bρ) of an ion.
