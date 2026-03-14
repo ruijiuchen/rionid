@@ -42,7 +42,7 @@ class RionID_GUI(QWidget):
                 parameters = toml.load(f)
                 self.datafile_edit.setText(parameters.get('datafile', ''))
                 self.filep_edit.setText(parameters.get('filep', ''))
-                self.remove_baseline_checkbox.setChecked(parameters.get('remove_baseline', True))
+                self.remove_baseline_checkbox.setChecked(parameters.get('remove_baseline_checkbox', True))
                 self.psd_baseline_removed_l_edit.setText(parameters.get('psd_baseline_removed_l', ''))
                 self.alphap_edit.setText(parameters.get('alphap', ''))
                 self.alphap_min_edit.setText(parameters.get('alphap_min', ''))
