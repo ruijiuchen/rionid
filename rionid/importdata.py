@@ -260,6 +260,13 @@ class ImportData(object):
                     self.psd_baseline_removed = (freq, psd_baseline_removed)
                     self.experimental_data = (freq, psd_baseline_removed)
                     print("✅ Baseline removal completed. Result stored in self.psd_baseline_removed.")
+                    if self.psd_baseline_removed is not None:
+                        freq, psd_new = self.psd_baseline_removed
+                        print(f"  → 频率点数: {len(freq)}")
+                        print(f"  → psd_baseline_removed 形状: {psd_new.shape if hasattr(psd_new, 'shape') else '不是数组'}")
+                        print(f"  → 前5个值: {psd_new[:5]}")
+                        print(f"  → 后5个值: {psd_new[-5:]}")
+                        print(f"  → 最小值: {psd_new.min():.6e}, 最大值: {psd_new.max():.6e}, 平均值: {psd_new.mean():.6e}")
                 else:
                     print("⚠️ Invalid format of self.experimental_data. Skipping baseline removal.")
             except Exception as e:

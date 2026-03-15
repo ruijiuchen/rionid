@@ -87,7 +87,7 @@ def save_simulation_results(mydata, mode, harmonics, sort_index, filename = 'sim
         header1 = f"{'ion':<15}{'fre[Hz]':<30}{'yield [pps]':<15}{'m/q [u]':<15}{'m [eV]':<15}"
         file.write(header1 + '\n')
         file.write('-' * len(header1) + '\n')
-        logger.info(header1)
+        #logger.info(header1)
         
         # Writing the sorted simulation results
         for i in sort_index:
@@ -104,5 +104,5 @@ def save_simulation_results(mydata, mode, harmonics, sort_index, filename = 'sim
                 mass_u = mydata.total_mass[ion]
                 mass = AMEData.to_mev(mass_u) * 1e6
                 result_line = f"{ion:<15}{fre:<30.10f}{yield_:<15.4e}{moq:<15.12f}{mass:<15.3f}"
-                logger.info(result_line)
+                #logger.info(result_line)
                 file.write(result_line + '\n')

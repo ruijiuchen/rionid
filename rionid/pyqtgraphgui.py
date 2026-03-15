@@ -178,6 +178,8 @@ class CreatePyGUI(QMainWindow):
         
     def plot_simulated_data(self, data):
         print("plotting simulated data...")
+        print("data.matching_freq_min = ",data.matching_freq_min)
+        print("data.matching_freq_max = ",data.matching_freq_max)
         self.simulated_data = data.simulated_data_dict
         refion = data.ref_ion
         highlight_ions = data.highlight_ions # Get the list of ions to highlight in green
@@ -188,57 +190,58 @@ class CreatePyGUI(QMainWindow):
                 label = entry[2]
                 yield_value = float(entry[1])  # Simulated yield (amplitude)
                 freq_range = 0.005  # Adjust this range if needed
-                if self.use_exp_height and data.experimental_data is not None:  # New: Check switch
-                    z_value = self.get_z_exp_at_freq(freq, freq_range)  # Use experimental height
-                    if z_value is None:  # Fallback if no match
-                        z_value = yield_value
-                else:
-                    z_value = yield_value  # Use simulated height
-                
-                label_color = None
-                if highlight_ions is not None and label in highlight_ions:
-                    label_color = 'green'
-                elif label == refion:
-                    label_color = 'yellow'
-                else:
-                    label_color = color
-                
-                # Parse and convert label to superscript format
-                match = re.match(r'(\d+)([A-Za-z]+)(\d+)\+', label)
-                if match:
-                    mass, elem, charge = match.groups()
-                    new_label = self.to_superscript(mass) + elem + self.to_superscript(charge) + '⁺'
-                else:
-                    new_label = label
-                
-                # Vertical line
-                line = self.plot_widget.plot([freq, freq], [1e-30, z_value], pen=pg.mkPen(color=label_color, width=1, style=Qt.DashLine))
-                # Text label at top with adjustable font size
-                text = pg.TextItem(text=new_label, color=label_color, anchor=(0,0.5))
-                text.setFont(QFont("Arial", self.font_size))  # 新增: 使用 self.font_size 设置离子符号字体
-                self.plot_widget.addItem(text)
-                text.setAngle(90)
-                text_width_pixels = text.boundingRect().width()
-                view_box = self.plot_widget.plotItem.vb
-                text_width_data_units = view_box.mapSceneToView(pg.QtCore.QPointF(text_width_pixels, 0)).x() - view_box.mapSceneToView(pg.QtCore.QPointF(0, 0)).x()
-                logy_checked = self.plot_widget.plotItem.ctrl.logYCheck.isChecked()
-                
-                if logy_checked:
-                    y_position = np.log10(z_value) if z_value != 0 else 0
-                else:
-                    y_position = z_value
-                x_position = freq
-                text.setPos(x_position, y_position)
-                
-                self.simulated_items.append((line, text))
-                
-                # Store in specific lists based on color
-                if label_color == 'red':
-                    self.red_lines.append((line, text))
-                elif label_color == 'green':
-                    self.green_points.append((line, text))  # Treating green lines/text as "points"
-                elif label_color == 'yellow':
-                    self.yellow_lines.append((line, text))
+                if freq>data.matching_freq_min/1e6 and freq< data.matching_freq_max/1e6:
+                    if self.use_exp_height and data.experimental_data is not None:  # New: Check switch
+                        z_value = self.get_z_exp_at_freq(freq, freq_range)  # Use experimental height
+                        if z_value is None:  # Fallback if no match
+                            z_value = yield_value
+                    else:
+                        z_value = yield_value  # Use simulated height
+                    
+                    label_color = None
+                    if highlight_ions is not None and label in highlight_ions:
+                        label_color = 'green'
+                    elif label == refion:
+                        label_color = 'yellow'
+                    else:
+                        label_color = color
+                    
+                    # Parse and convert label to superscript format
+                    match = re.match(r'(\d+)([A-Za-z]+)(\d+)\+', label)
+                    if match:
+                        mass, elem, charge = match.groups()
+                        new_label = self.to_superscript(mass) + elem + self.to_superscript(charge) + '⁺'
+                    else:
+                        new_label = label
+                    
+                    # Vertical line
+                    line = self.plot_widget.plot([freq, freq], [1e-30, z_value], pen=pg.mkPen(color=label_color, width=1, style=Qt.DashLine))
+                    # Text label at top with adjustable font size
+                    text = pg.TextItem(text=new_label, color=label_color, anchor=(0,0.5))
+                    text.setFont(QFont("Arial", self.font_size))  # 新增: 使用 self.font_size 设置离子符号字体
+                    self.plot_widget.addItem(text)
+                    text.setAngle(90)
+                    text_width_pixels = text.boundingRect().width()
+                    view_box = self.plot_widget.plotItem.vb
+                    text_width_data_units = view_box.mapSceneToView(pg.QtCore.QPointF(text_width_pixels, 0)).x() - view_box.mapSceneToView(pg.QtCore.QPointF(0, 0)).x()
+                    logy_checked = self.plot_widget.plotItem.ctrl.logYCheck.isChecked()
+                    
+                    if logy_checked:
+                        y_position = np.log10(z_value) if z_value != 0 else 0
+                    else:
+                        y_position = z_value
+                    x_position = freq
+                    text.setPos(x_position, y_position)
+                    
+                    self.simulated_items.append((line, text))
+                    
+                    # Store in specific lists based on color
+                    if label_color == 'red':
+                        self.red_lines.append((line, text))
+                    elif label_color == 'green':
+                        self.green_points.append((line, text))  # Treating green lines/text as "points"
+                    elif label_color == 'yellow':
+                        self.yellow_lines.append((line, text))
 
             self.legend.addItem(line, f'Harmonic = {float(harmonic)} ; Bρ = {data.brho:.6f} [Tm].')
             self.legend.addItem(
