@@ -48,6 +48,10 @@ class CreatePyGUI(QMainWindow):
         self.red_triangles = None  # For red triangles (peaks)
         self.use_exp_height = True  # New: Default to use experimental height
         self.current_data = None    # New: Store current data for redrawing
+        self.experimental_data = None
+        self.remove_baseline=None
+        self.psd_baseline_removed = None
+        self.psd_baseline = None
         
     def getPlotWidget(self):
         return self.plot_widget    
@@ -134,13 +138,23 @@ class CreatePyGUI(QMainWindow):
         if data.experimental_data is None:  # Check if experimental data is available
             print("No experimental data available, skipping experimental data plotting.")
             return  # Skip plotting experimental data
-        self.exp_data = data.experimental_data
-        # Plot experimental data
-        if hasattr(self, 'exp_data_line'):
-            self.plot_widget.removeItem(self.exp_data_line)
+            
+        # Plot experimental data            
+        self.experimental_data = data.experimental_data
+        
+        self.remove_baseline = data.remove_baseline
+        self.psd_baseline_removed = data.psd_baseline_removed
+        self.psd_baseline = data.psd_baseline
+        
+        print("self.remove_baseline ",self.remove_baseline)
+        print("self.psd_baseline_removed ",self.psd_baseline_removed)
+        print("self.psd_baseline ",self.psd_baseline)
+        
+        if hasattr(self, 'experimental_data_line'):
+            self.plot_widget.removeItem(self.experimental_data_line)
 
-        # Set the initial X-range to encompass all experimental data
-        self.x_exp, self.z_exp = self.exp_data[0]*1e-6, self.exp_data[1]
+        # Set the initial X-range to encompass all experimental data、
+        self.x_exp, self.z_exp = self.experimental_data[0]*1e-6, self.experimental_data[1]
         
         if self.saved_x_range is None:
             self.saved_x_range = (min(self.x_exp), max(self.x_exp))
@@ -153,8 +167,8 @@ class CreatePyGUI(QMainWindow):
                 # Handle the logarithmic scale by setting the minimum to a small value if necessary
                 min_z = 1e-10  # or some other small positive value
         
-        self.exp_data_line = self.plot_widget.plot(self.x_exp, self.z_exp, pen=pg.mkPen('blue', width=3))
-        self.legend.addItem(self.exp_data_line, 'Experimental Data')
+        self.experimental_data_line = self.plot_widget.plot(self.x_exp, self.z_exp, pen=pg.mkPen('blue', width=3))
+        self.legend.addItem(self.experimental_data_line, 'Experimental Data')
         
         # --- Mark each detected peak with a red triangle ---
         # 1) Convert peak frequencies to MHz and get peak heights
@@ -202,10 +216,10 @@ class CreatePyGUI(QMainWindow):
                     if highlight_ions is not None and label in highlight_ions:
                         label_color = 'green'
                     elif label == refion:
-                        label_color = 'yellow'
+                        label_color = 'black'
                     else:
                         label_color = color
-                    
+                        
                     # Parse and convert label to superscript format
                     match = re.match(r'(\d+)([A-Za-z]+)(\d+)\+', label)
                     if match:
@@ -318,15 +332,15 @@ class CreatePyGUI(QMainWindow):
         self.yellow_lines = []
 
     def clear_experimental_data(self):
-        if hasattr(self, 'exp_data_line'):
+        if hasattr(self, 'experimental_data_line'):
             print("Clearing experimental data plot...")
-            self.plot_widget.removeItem(self.exp_data_line)
-            self.legend.removeItem(self.exp_data_line)
+            self.plot_widget.removeItem(self.experimental_data_line)
+            self.legend.removeItem(self.experimental_data_line)
         if self.red_triangles:
             self.plot_widget.removeItem(self.red_triangles)
             self.legend.removeItem(self.red_triangles)
-        self.exp_data_line = None
-        self.exp_data = None
+        self.experimental_data_line = None
+        self.experimental_data = None
         self.red_triangles = None
 
     def toggle_simulated_data(self):

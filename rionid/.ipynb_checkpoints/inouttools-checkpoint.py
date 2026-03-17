@@ -43,10 +43,10 @@ class KeySelectionDialog(QDialog):
             # Optionally set default selections
             if 'arr_0' in keys:
                 self.freq_combo.setCurrentText('arr_0')
-            if 'arr_2' in keys:
-                self.amp_combo.setCurrentText('arr_2')
             if 'arr_1' in keys:
-                self.time_combo.setCurrentText('arr_1')
+                self.amp_combo.setCurrentText('arr_1')
+            if 'arr_2' in keys:
+                self.time_combo.setCurrentText('arr_2')
         
         form_layout.addRow("Frequency Key:", self.freq_combo)
         form_layout.addRow("Amplitude Key:", self.amp_combo)

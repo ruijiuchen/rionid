@@ -44,6 +44,7 @@ class RionID_GUI(QWidget):
                 self.filep_edit.setText(parameters.get('filep', ''))
                 self.remove_baseline_checkbox.setChecked(parameters.get('remove_baseline_checkbox', True))
                 self.psd_baseline_removed_l_edit.setText(parameters.get('psd_baseline_removed_l', ''))
+                self.psd_baseline_removed_ratio_edit.setText(parameters.get('psd_baseline_removed_ratio', ''))
                 self.alphap_edit.setText(parameters.get('alphap', ''))
                 self.alphap_min_edit.setText(parameters.get('alphap_min', ''))
                 self.alphap_max_edit.setText(parameters.get('alphap_max', ''))
@@ -77,6 +78,7 @@ class RionID_GUI(QWidget):
             'filep': self.filep_edit.text(),
             'remove_baseline_checkbox': self.remove_baseline_checkbox.isChecked(),
             'psd_baseline_removed_l': self.psd_baseline_removed_l_edit.text(),
+            'psd_baseline_removed_ratio': self.psd_baseline_removed_ratio_edit.text(),
             'alphap': self.alphap_edit.text(),
             'alphap_min': self.alphap_min_edit.text(),
             'alphap_max': self.alphap_max_edit.text(),
@@ -203,6 +205,12 @@ class RionID_GUI(QWidget):
         self.psd_baseline_removed_l_label.setFont(common_font)
         self.psd_baseline_removed_l_edit.setFont(common_font)
     
+        # psd_baseline_removed_ratio estimate parameters input
+        self.psd_baseline_removed_ratio_label = QLabel('ratio(e.g. 1e-6):')
+        self.psd_baseline_removed_ratio_edit = QLineEdit()
+        self.psd_baseline_removed_ratio_label.setFont(common_font)
+        self.psd_baseline_removed_ratio_edit.setFont(common_font)
+    
         # αₚ main input
         self.alphap_label = QLabel('<i>α<sub>p</sub> or γ<sub>t</sub> :</i>')
         self.alphap_edit = QLineEdit()
@@ -253,6 +261,11 @@ class RionID_GUI(QWidget):
         hbox_psd_baseline_removed_l.addWidget(self.psd_baseline_removed_l_label)
         hbox_psd_baseline_removed_l.addWidget(self.psd_baseline_removed_l_edit)
         self.vbox.addLayout(hbox_psd_baseline_removed_l)
+
+        hbox_psd_baseline_removed_ratio = QHBoxLayout()
+        hbox_psd_baseline_removed_ratio.addWidget(self.psd_baseline_removed_ratio_label)
+        hbox_psd_baseline_removed_ratio.addWidget(self.psd_baseline_removed_ratio_edit)
+        self.vbox.addLayout(hbox_psd_baseline_removed_ratio)
 
         hbox_alphap = QHBoxLayout()
         hbox_alphap.addWidget(self.alphap_label)
@@ -562,6 +575,7 @@ class RionID_GUI(QWidget):
             filep = self.filep_edit.text()
             remove_baseline = self.remove_baseline_checkbox.isChecked()
             psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
+            psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
             alphap = float(self.alphap_edit.text())
             peak_threshold_pct = float(self.peak_thresh_edit.text())
             min_distance = float(self.min_distance_edit.text())
@@ -592,6 +606,7 @@ class RionID_GUI(QWidget):
                                         filep=filep or None,
                                         remove_baseline = remove_baseline or None,
                                         psd_baseline_removed_l=psd_baseline_removed_l or None,
+                                        psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
                                         alphap=alphap or None,
                                         harmonics=harmonics or None,
                                         refion=refion or None,
@@ -643,6 +658,7 @@ class RionID_GUI(QWidget):
             filep = self.filep_edit.text() or None
             remove_baseline = self.remove_baseline_checkbox.isChecked()
             psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
+            psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
             alphap = float(self.alphap_edit.text())
             peak_threshold_pct = float(self.peak_thresh_edit.text())
             min_distance = float(self.min_distance_edit.text())
@@ -677,6 +693,7 @@ class RionID_GUI(QWidget):
                 highlight_ions=highlight_ions,
                 remove_baseline = remove_baseline or None,
                 psd_baseline_removed_l=psd_baseline_removed_l or None,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
                 alphap=alphap,
                 filename=datafile,
                 reload_data=reload_data,
@@ -760,6 +777,7 @@ class RionID_GUI(QWidget):
                         filep=filep,
                         remove_baseline = remove_baseline,
                         psd_baseline_removed_l = psd_baseline_removed_l,
+                        psd_baseline_removed_ratio = psd_baseline_removed_ratio,
                         alphap=test_alphap,
                         harmonics=harmonics,
                         refion=refion,
@@ -802,6 +820,7 @@ class RionID_GUI(QWidget):
                     filep=filep,
                     remove_baseline = remove_baseline,
                     psd_baseline_removed_l = psd_baseline_removed_l,
+                    psd_baseline_removed_ratio = psd_baseline_removed_ratio,
                     alphap=best_alphap,
                     harmonics=harmonics,
                     refion=refion,

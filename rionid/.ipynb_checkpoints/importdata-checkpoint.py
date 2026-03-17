@@ -21,7 +21,7 @@ class ImportData(object):
     '''
     Model (MVC)
     '''
-    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l,alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None):
+    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l, psd_baseline_removed_ratio, alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None):
         self.simulated_data_dict = {}  # Make sure this is initialized
         # Argparser arguments
         self.harmonics=[]
@@ -52,8 +52,10 @@ class ImportData(object):
         self.matching_freq_min=matching_freq_min
         self.matching_freq_max=matching_freq_max
         self.remove_baseline = remove_baseline
+        self.psd_baseline_removed = None
+        self.psd_baseline = None
         self.psd_baseline_removed_l=psd_baseline_removed_l
-        self.psd_baseline_removed_ratio=1e-6
+        self.psd_baseline_removed_ratio=psd_baseline_removed_ratio
         self.ref_frequency=0
         # Get the experimental data
         if filename is not None:
@@ -250,28 +252,47 @@ class ImportData(object):
             else:
                 self.experimental_data = handle_tiqnpz_data(filename)
                 
-         # remove baseline or not.
         if self.remove_baseline:
             try:
                 if self.experimental_data is not None and len(self.experimental_data) == 2:
                     freq, psd = self.experimental_data
+                    
+                    print("✅ Baseline removal is working... l= ",self.psd_baseline_removed_l," r= ",self.psd_baseline_removed_ratio)
                     baseline = NONPARAMS_EST(psd).pls('BrPLS', l=self.psd_baseline_removed_l, ratio=self.psd_baseline_removed_ratio)
                     psd_baseline_removed = psd - baseline
+                    
+                    self.psd_baseline = (freq, baseline)
                     self.psd_baseline_removed = (freq, psd_baseline_removed)
-                    self.experimental_data = (freq, psd_baseline_removed)
                     print("✅ Baseline removal completed. Result stored in self.psd_baseline_removed.")
+                    
                     if self.psd_baseline_removed is not None:
                         freq, psd_new = self.psd_baseline_removed
-                        print(f"  → 频率点数: {len(freq)}")
-                        print(f"  → psd_baseline_removed 形状: {psd_new.shape if hasattr(psd_new, 'shape') else '不是数组'}")
-                        print(f"  → 前5个值: {psd_new[:5]}")
-                        print(f"  → 后5个值: {psd_new[-5:]}")
-                        print(f"  → 最小值: {psd_new.min():.6e}, 最大值: {psd_new.max():.6e}, 平均值: {psd_new.mean():.6e}")
+                        
+                        if np.any(np.isnan(psd_new)):
+                            raise RuntimeError(
+                                "基线去除后 psd_baseline_removed 包含 NaN 值！\n"
+                                "这通常意味着：\n"
+                                "1. 输入 PSD 数据本身包含大量无效值\n"
+                                "2. BrPLS 算法未能产生有效基线（可能参数 l/ratio 不合适）\n"
+                                f"当前形状: {psd_new.shape}，NaN 数量: {np.isnan(psd_new).sum()}/{psd_new.size}"
+                            )
+                        
+                        print(f" → 频率点数: {len(freq)}")
+                        print(f" → psd_baseline_removed 形状: {psd_new.shape if hasattr(psd_new, 'shape') else '不是数组'}")
+                        print(f" → 前5个值: {psd_new[:5]}")
+                        print(f" → 后5个值: {psd_new[-5:]}")
+                        print(f" → 最小值: {psd_new.min():.6e}, 最大值: {psd_new.max():.6e}, 平均值: {psd_new.mean():.6e}")
                 else:
                     print("⚠️ Invalid format of self.experimental_data. Skipping baseline removal.")
+                    
             except Exception as e:
                 print("❌ Baseline removal failed:", e)
                 traceback.print_exc()
+                
+                # ──────────────── 关键修改：强制终止程序 ────────────────
+                print("\n程序因严重错误而终止（基线去除失败）。")
+                import sys
+                sys.exit(1)   # 退出码 1 表示异常退出
 
     
         self.detect_peaks_and_widths()
@@ -432,12 +453,44 @@ class ImportData(object):
            # get srf data
            if mode == 'Frequency':
                harmonic_frequency = self.srrf * self.ref_frequency
-           else:
-               harmonic_frequency = self.srrf * self.ref_frequency * harmonic
+           elif mode == 'Bρ':
+                #harmonic_frequency = self.srrf * self.ref_frequency * harmonic
+                print("self.ref_frequency = ",self.ref_frequency)
+                harmonic_freq_list = []
+                # ───────────── Bρ 固定模式：每個離子獨立計算自己的頻率 ─────────────
+                for i, ion_name in enumerate(moq_keys):
+                    try:
+                        # 解析出該離子的質量數 A、元素、電荷 q
+                        A, elem, q = self._parse_ion_name(ion_name)
+                        
+                        # 該離子的總質量（以 u 為單位） ≈ moq * q
+                        
+                        #mass_u = self.moq[ion_name] * q
+                        mass_u = AMEData.to_mev(self.moq[ion_name] * q)
+                        
+                        # 使用現有的靜態方法計算這個離子的革命頻率
+                        f_rev = ImportData.calc_ref_rev_frequency(
+                            ref_mass=mass_u,                    # 注意單位是 u
+                            ring_circumference=self.ring.circumference,
+                            brho=brho,
+                            ref_charge=q                        # 這個離子的電荷
+                        )
+                        
+                        # 第 h 次諧波的頻率
+                        this_harmonic_freq = harmonic * f_rev
+                        print("A = ",A," elem = ",elem," q = ",q," f_rev = ",f_rev," this_harmonic_freq = ",this_harmonic_freq)
+                        harmonic_freq_list.append(this_harmonic_freq)
+                    
+                    except Exception as e:
+                        print(f"計算離子 {ion_name} 在 Bρ 模式下的頻率失敗：{e}")
+                        continue
+                harmonic_frequency = np.array(harmonic_freq_list)
+               
            # attach harmonic, frequency, yield data and ion properties together:
            print(f"harmonic_frequency shape: {harmonic_frequency.shape}")
            print(f"yield_data shape: {self.yield_data.shape}")
            print(f"nuclei_names shape: {self.nuclei_names.shape}")
+           
            array_stack = stack((harmonic_frequency, self.yield_data, self.nuclei_names), axis=1)  # axis=1 stacks vertically
            simulated_data = append(simulated_data, array_stack)
            simulated_data = simulated_data.reshape(len(array_stack), 3)
