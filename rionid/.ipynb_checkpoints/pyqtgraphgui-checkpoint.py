@@ -258,6 +258,7 @@ class CreatePyGUI(QMainWindow):
                         self.yellow_lines.append((line, text))
 
             self.legend.addItem(line, f'Harmonic = {float(harmonic)} ; Bρ = {data.brho:.6f} [Tm].')
+            
             self.legend.addItem(
                 line,
                 f"reference frequency = {data.ref_frequency:.2f} Hz ; "

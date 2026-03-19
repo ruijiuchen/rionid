@@ -67,44 +67,81 @@ def display_nions(nions, yield_data, nuclei_names, simulated_data_dict, ref_ion,
         name = f'{harmonic}'
         simulated_data_dict[name] = simulated_data_dict[name][sorted_indices]
 
-def save_simulation_results(mydata, mode, harmonics, sort_index, filename = 'simulation_result.out'):
+def save_simulation_results(mydata, mode, harmonics, sort_index=None, filename='simulation_result.out'):
     """
     Saves the simulation results to a specified file.
     
     Parameters:
-    - filename: str, the name of the file to save the results.
-    - mydata: ImportData object, contains the calculated simulation data.
-    - harmonics: list of floats, the harmonic numbers used in the simulation.
-    - sort_index: list of indices, sorted indices of the simulated results by frequency.
+    - mydata:        object containing simulated_data_dict, moq, total_mass, etc.
+    - mode:          'Frequency' or 'Bρ'
+    - harmonics:     list of harmonic numbers
+    - sort_index:    (optional) global sorted indices — 如果不傳就每個 harmonic 單獨排序
+    - filename:      output filename
     """
     with open(filename, 'w') as file:
-        # Writing harmonics and brho information
-        brho = mydata.brho
+        brho = getattr(mydata, 'brho', None)   # Bρ mode 才會有
+        
+        # 先寫整體資訊
+        file.write(f"Simulation mode: {mode}\n")
+        if brho is not None:
+            file.write(f"Reference Bρ: {brho:.6f} Tm\n")
+        file.write(f"Harmonics: {harmonics}\n")
+        file.write("=" * 80 + "\n\n")
+        
         for harmonic in harmonics:
-            header0 = f'Harmonic: {harmonic} , Bp: {brho:.6f} [Tm]'
-            logger.info(header0)
-            file.write(header0 + '\n')
-        
-        # Writing the header for the data table
-        header1 = f"{'ion':<15}{'fre[Hz]':<30}{'yield [pps]':<15}{'m/q [u]':<15}{'m [eV]':<15}"
-        file.write(header1 + '\n')
-        file.write('-' * len(header1) + '\n')
-        #logger.info(header1)
-        
-        # Writing the sorted simulation results
-        for i in sort_index:
-            ion = mydata.nuclei_names[i]
-            fre = None  # Initialize fre as None
-            if mode == 'Frequency': 
-                fre = mydata.srrf[i] * mydata.ref_frequency
-            elif mode == 'Bρ': 
-                fre = mydata.srrf[i] * mydata.ref_frequency*harmonic
-            # Only proceed if fre is not None
-            if fre is not None:
-                yield_ = mydata.yield_data[i]
-                moq = mydata.moq[ion]
-                mass_u = mydata.total_mass[ion]
-                mass = AMEData.to_mev(mass_u) * 1e6
-                result_line = f"{ion:<15}{fre:<30.10f}{yield_:<15.4e}{moq:<15.12f}{mass:<15.3f}"
-                #logger.info(result_line)
-                file.write(result_line + '\n')
+            key = f'{harmonic}'   # 你當初是用 str(harmonic) 當 key
+            if key not in mydata.simulated_data_dict:
+                file.write(f"Harmonic {harmonic} : no data\n\n")
+                continue
+                
+            data = mydata.simulated_data_dict[key]   # shape: (n_ions, 3)
+            # data[:,0] → frequency
+            # data[:,1] → yield
+            # data[:,2] → ion name (string array)
+            
+            # 建議：每個 harmonic 獨立排序（頻率由小到大）
+            if sort_index is None:
+                # 就地排序索引
+                sort_idx = np.argsort(data[:, 0].astype(float))
+            else:
+                # 如果堅持用外部傳入的全局排序索引（較少見）
+                sort_idx = sort_index
+            
+            sorted_data = data[sort_idx]
+            
+            # 標頭
+            header = f"Harmonic: {harmonic}"
+            if brho is not None:
+                header += f"    Bρ: {brho:.6f} Tm"
+            file.write(header + "\n")
+            
+            file.write(
+                f"{'ion':<18} "
+                f"{'frequency [Hz]':<22} "
+                f"{'yield [pps]':<16} "
+                f"{'m/q [u]':<18} "
+                f"{'mass [MeV/c²]':<18}\n"
+            )
+            file.write("-" * 90 + "\n")
+            
+            for row in sorted_data:
+                ion_name   = row[2]
+                freq       = float(row[0])
+                yield_pps  = float(row[1])
+                
+                moq        = mydata.moq.get(ion_name, np.nan)
+                mass_u     = mydata.total_mass.get(ion_name, np.nan)
+                mass_mev   = AMEData.to_mev(mass_u) if not np.isnan(mass_u) else np.nan
+                
+                line = (
+                    f"{ion_name:<18} "
+                    f"{freq:<22.10f} "
+                    f"{yield_pps:<16.4e} "
+                    f"{moq:<18.12f} "
+                    f"{mass_mev:<18.3f}"
+                )
+                file.write(line + "\n")
+            
+            file.write("\n" + "=" * 80 + "\n\n")
+
+    print(f"Simulation results saved to: {filename}")

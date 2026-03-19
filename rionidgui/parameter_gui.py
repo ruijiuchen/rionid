@@ -217,12 +217,6 @@ class RionID_GUI(QWidget):
         self.alphap_label.setFont(common_font)
         self.alphap_edit.setFont(common_font)
     
-        # The circumference of the storage ring
-        self.circumference_label = QLabel('Circumference (m):')
-        self.circumference_edit = QLineEdit()
-        self.circumference_label.setFont(common_font)
-        self.circumference_edit.setFont(common_font)
-    
         # ——— Other parameters ———
         # Harmonic
         self.harmonics_label = QLabel('Harmonics (e.g. 124 125 126):')
@@ -245,6 +239,11 @@ class RionID_GUI(QWidget):
         self.mode_combo.addItems(['Frequency', 'Bρ', 'Kinetic Energy'])
         self.mode_label.setFont(common_font)
         self.mode_combo.setFont(common_font)
+        # The circumference of the storage ring
+        self.circumference_label = QLabel('Circumference (m):')
+        self.circumference_edit = QLineEdit()
+        self.circumference_label.setFont(common_font)
+        self.circumference_edit.setFont(common_font)
         # Scaling factor
         self.sim_scalingfactor_label = QLabel('Scaling factor:')
         self.sim_scalingfactor_edit = QLineEdit()
@@ -267,17 +266,24 @@ class RionID_GUI(QWidget):
         hbox_psd_baseline_removed_ratio.addWidget(self.psd_baseline_removed_ratio_edit)
         self.vbox.addLayout(hbox_psd_baseline_removed_ratio)
 
-        hbox_alphap = QHBoxLayout()
-        hbox_alphap.addWidget(self.alphap_label)
-        hbox_alphap.addWidget(self.alphap_edit)
-        self.vbox.addLayout(hbox_alphap)
+        hbox_mode = QHBoxLayout()
+        hbox_mode.addWidget(self.mode_label)
+        hbox_mode.addWidget(self.mode_combo)
+        hbox_mode.addWidget(self.value_edit)
+        self.vbox.addLayout(hbox_mode)
 
         # circumference
         hbox_circ = QHBoxLayout()
         hbox_circ.addWidget(self.circumference_label)
         hbox_circ.addWidget(self.circumference_edit)
         self.vbox.addLayout(hbox_circ)
-    
+        
+
+        hbox_alphap = QHBoxLayout()
+        hbox_alphap.addWidget(self.alphap_label)
+        hbox_alphap.addWidget(self.alphap_edit)
+        self.vbox.addLayout(hbox_alphap)
+
         # other parameters
         for label, widget in (
             (self.harmonics_label, self.harmonics_edit),
@@ -291,12 +297,6 @@ class RionID_GUI(QWidget):
         self.vbox.addWidget(self.highlight_ions_label)
         self.vbox.addWidget(self.highlight_ions_edit)
         
-        hbox_mode = QHBoxLayout()
-        hbox_mode.addWidget(self.mode_label)
-        hbox_mode.addWidget(self.mode_combo)
-        hbox_mode.addWidget(self.value_edit)
-        self.vbox.addLayout(hbox_mode)
-    
         # Next, pack scaling‐factor and Run button together
         hbox_sf = QHBoxLayout()
         hbox_sf.addWidget(self.sim_scalingfactor_label)
