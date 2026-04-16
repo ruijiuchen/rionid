@@ -379,7 +379,10 @@ class CreatePyGUI(QMainWindow):
         pos = evt[0]  # using signal proxy turns original arguments into a tuple
         if self.plot_widget.sceneBoundingRect().contains(pos):
             mousePoint = self.plot_widget.plotItem.vb.mapSceneToView(pos)
-            self.cursor_pos_label.setText(f"Cursor Position: x={mousePoint.x():.8f}, y={mousePoint.y():.2f}")
+            if self.plot_widget.plotItem.ctrl.logYCheck.isChecked():
+                self.cursor_pos_label.setText(f"Cursor Position: x={mousePoint.x():.8f}, y={10**(mousePoint.y()):.6e}")
+            else:
+                self.cursor_pos_label.setText(f"Cursor Position: x={mousePoint.x():.8f}, y={mousePoint.y():.6e}")
 
     def save_plot_with_dialog(self):
         from PyQt5.QtPrintSupport import QPrinter

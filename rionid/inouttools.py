@@ -462,22 +462,25 @@ class RootInputDialog(QDialog):
             'y2': self.y2_edit.text()
         }
 
-def handle_root_data(filename,y1, y2, h2name):
+def handle_root_data(filename, y1, y2, h2name):
+    """
+    处理 ROOT 文件中的直方图：
+    - 如果是 TH2F：按 y1~y2 范围做 ProjectionX
+    - 如果是 TH1F：直接使用该直方图（忽略 y1, y2）
+    """
     # Create and show the dialog
     dialog = RootInputDialog(filename=filename)
     if dialog.exec_() != QDialog.Accepted:
         raise ValueError("Dialog cancelled by user.")
-
+    
     params = dialog.get_params()
+   
     try:
         y1 = float(params['y1']) if params['y1'].strip() else None
         y2 = float(params['y2']) if params['y2'].strip() else None
         h2name = params['h2name'] or "h2_baseline_removed"
     except ValueError:
         raise ValueError("Invalid input for y1 or y2. Please enter valid numbers.")
-
-    if y1 is None or y2 is None:
-        raise ValueError("Y1 and Y2 must be provided.")
 
     # Open ROOT file
     f = ROOT.TFile.Open(filename)
@@ -488,17 +491,34 @@ def handle_root_data(filename,y1, y2, h2name):
     if not h2:
         raise ValueError(f"Histogram '{h2name}' not found in file.")
 
-    # Get y bin index range
-    y_bin_min = h2.GetYaxis().FindBin(y1)
-    y_bin_max = h2.GetYaxis().FindBin(y2)
-
-    # Project to x, restricting y range
-    h_proj = h2.ProjectionX("_px", y_bin_min, y_bin_max)
+    # ====================== 核心修改部分 ======================
+    if isinstance(h2, ROOT.TH2F):
+        # 是 TH2F：按 y 范围投影到 X
+        if y1 is None or y2 is None:
+            raise ValueError("Y1 and Y2 must be provided when input is TH2F.")
+        
+        y_bin_min = h2.GetYaxis().FindBin(y1)
+        y_bin_max = h2.GetYaxis().FindBin(y2)
+        
+        # ProjectionX (y_bin_min 到 y_bin_max)
+        h_proj = h2.ProjectionX("_px", y_bin_min, y_bin_max)
+        
+        print(f"TH2F detected: Projected Y range [{y1}, {y2}] → bins [{y_bin_min}, {y_bin_max}]")
+        
+    elif isinstance(h2, ROOT.TH1F):
+        # 是 TH1F：直接使用，不做投影（忽略 y1/y2）
+        h_proj = h2
+        print(f"TH1F detected: Using histogram directly (y1/y2 ignored)")
+        
+    else:
+        raise TypeError(f"Unsupported histogram type: {type(h2).__name__}. "
+                       "Only TH1F and TH2F are supported.")
+    # =========================================================
 
     # Extract bin centers (frequency) and contents (amplitude)
     nbins = h_proj.GetNbinsX()
-    frequency = np.array([h_proj.GetBinCenter(i+1) for i in range(nbins)])
-    amplitude = np.array([h_proj.GetBinContent(i+1) for i in range(nbins)])
+    frequency = np.array([h_proj.GetBinCenter(i + 1) for i in range(nbins)])
+    amplitude = np.array([h_proj.GetBinContent(i + 1) for i in range(nbins)])
 
     f.Close()
     return frequency * 1e6, amplitude
