@@ -89,68 +89,98 @@ class KeySelectionDialog(QDialog):
             print('总共有', len(data.files), '个 key')
             print('每个 key 的名称和维度：')
             for k in sorted(data.files):
-                print(f'  {k:20}  {data[k].shape}')
-                
+                print(f' {k:20} {data[k].shape}')
+            
             freq_key = self.freq_combo.currentText()
             amp_key = self.amp_combo.currentText()
             time_key = self.time_combo.currentText()
+            
             if not all([freq_key, amp_key, time_key]):
                 raise ValueError("All keys must be selected.")
     
-            freq = data[freq_key]/1e6
+            # 读取原始数据
+            freq = data[freq_key] / 1e6          # 转为 MHz
             amp = data[amp_key]
-            time = data[time_key][:-1]
+            time = data[time_key][:-1]           # 你原来的逻辑，保留[:-1]
     
-            # 调试输出（上线前可删除）
-            print(f"amp shape: {amp.shape}, ndim: {amp.ndim}")
-            print(f"freq length: {len(freq)}, time length: {len(time)}")
+            # ==================== 关键修复：自动对齐维度 ====================
+            if amp.ndim == 2:
+                n_time, n_freq_amp = amp.shape
+                n_freq = len(freq)
+                n_time_data = len(time)
     
-            time_pro_min_str = self.time_px_min_edit.text()
-            time_pro_max_str = self.time_px_max_edit.text()
+                print(f"Before alignment -> amp: {amp.shape}, freq: {n_freq}, time: {n_time_data}")
     
-            time_pro_min = float(time_pro_min_str) if time_pro_min_str.strip() else None
-            time_pro_max = float(time_pro_max_str) if time_pro_max_str.strip() else None
+                # 常见情况：频率点数相差 1
+                if n_freq == n_freq_amp + 1:
+                    freq = freq[:-1]   # 去掉最后一个频率点（最常见）
+                    print(f"Warning: freq length adjusted from {n_freq} to {n_freq_amp} to match amp")
+                elif n_freq_amp == n_freq + 1:
+                    amp = amp[:, :-1]  # amp 多一个点，裁剪 amp
+                    print(f"Warning: amp frequency dimension adjusted from {n_freq_amp} to {n_freq}")
+                elif n_time != n_time_data:
+                    # 时间维度必须严格匹配
+                    raise ValueError(
+                        f"Time dimension mismatch: amp.shape[0]={n_time}, time length={n_time_data}"
+                    )
+    
+                print(f"After alignment  -> amp: {amp.shape}, freq: {len(freq)}, time: {len(time)}")
+    
+            # 检查是否所有 key 都已选择
+            if not all([freq_key, amp_key, time_key]):
+                raise ValueError("All keys must be selected.")
     
             # ─── 判断绘图类型 ───────────────────────────────────────────
             if amp.ndim == 1:
                 # 1D 谱图：频率 vs 幅度 → 用折线图
                 plot_up_type = "line"
                 plot_down_type = "line"
-                # 检查 freq 和 amp 长度是否匹配
+                
                 if len(amp) != len(freq):
                     raise ValueError(f"Length mismatch: amp({len(amp)}) vs freq({len(freq)})")
-    
+                
                 full_y = amp
                 proj_y = amp
-                proj_x = freq  # 下图也用相同 x
+                proj_x = freq
     
             elif amp.ndim == 2:
                 # 2D 时频谱图
                 plot_up_type = "imshow"
                 plot_down_type = "line"
+                
+                # 经过上面调整后，这里应该已经匹配
                 if amp.shape[0] != len(time) or amp.shape[1] != len(freq):
                     raise ValueError(
-                        f"2D shape mismatch: expected ({len(time)}, {len(freq)}), got {amp.shape}"
+                        f"2D shape mismatch after alignment: amp.shape={amp.shape}, "
+                        f"expected ({len(time)}, {len(freq)})"
                     )
+                
                 full_img = amp
     
                 # 准备投影区域（x轴投影：沿时间求和）
+                time_pro_min_str = self.time_px_min_edit.text()
+                time_pro_max_str = self.time_px_max_edit.text()
+    
+                time_pro_min = float(time_pro_min_str) if time_pro_min_str.strip() else None
+                time_pro_max = float(time_pro_max_str) if time_pro_max_str.strip() else None
+    
                 if time_pro_min is not None and time_pro_max is not None:
                     mask = (time >= time_pro_min) & (time <= time_pro_max)
                     if not np.any(mask):
                         raise ValueError("No points in selected time projection range")
                     
                     # x轴投影：沿时间维度（axis=0）求和
-                    proj_img = np.sum(full_img[mask, :], axis=0)          # 结果 shape: (len(freq),)
+                    proj_img = np.sum(full_img[mask, :], axis=0)   # shape: (len(freq),)
                     proj_y = proj_img
-                    proj_x = freq  # 下图也用相同 x
+                    proj_x = freq
                     proj_time = time[mask]
                 else:
-                    # 无范围时，也对全图做投影
+                    # 无范围时，对全图做投影
                     proj_img = np.sum(full_img, axis=0)
                     proj_y = proj_img
-                    proj_x = freq  # 下图也用相同 x
+                    proj_x = freq
                     proj_time = time
+    
             else:
                 raise ValueError(f"Unsupported ndim: {amp.ndim} (expected 1 or 2)")
     
@@ -163,7 +193,7 @@ class KeySelectionDialog(QDialog):
             # 上图：完整视图
             if plot_up_type == "line":
                 upper_ax.plot(freq, full_y, color='blue', lw=1.0)
-                upper_ax.set_xlabel('Frequency (Hz)')
+                upper_ax.set_xlabel('Frequency (MHz)')
                 upper_ax.set_ylabel('Amplitude')
                 upper_ax.set_title('Full Spectrum')
                 upper_ax.grid(True, alpha=0.3)
@@ -191,7 +221,7 @@ class KeySelectionDialog(QDialog):
                 lower_ax.plot(proj_x, proj_y, color='darkgreen', lw=1.2)
                 lower_ax.set_xlabel('Frequency (MHz)')
                 lower_ax.set_ylabel('Amplitude')
-                lower_ax.set_title('Spectrum (same as above)')
+                lower_ax.set_title('Spectrum Projection (Sum over Time)')
                 lower_ax.grid(True, alpha=0.3)
     
             elif plot_down_type == "imshow":
@@ -277,38 +307,87 @@ def handle_read_rsa_result_csv(filename):
     return frequency, amplitude
 
 def handle_tiqnpz_data(filename, parent=None):
-    data = np.load(filename)
-    keys = list(data.keys())
-    dialog = KeySelectionDialog(parent, keys=keys, filename=filename)
-    if dialog.exec_() == QDialog.Accepted:
-        params = dialog.get_params()
-        frequency_key = params['frequency']
-        amplitude_key = params['amplitude']
-        time_key = params['time']
-        time_pro_min_str = params['time_px_min']
-        time_pro_max_str = params['time_px_max']
+    try:
+        data = np.load(filename)
+        keys = list(data.keys())
         
-        # Convert min and max strings to floats or None
-        time_pro_min = float(time_pro_min_str) if time_pro_min_str.strip() else None
-        time_pro_max = float(time_pro_max_str) if time_pro_max_str.strip() else None
+        dialog = KeySelectionDialog(parent, keys=keys, filename=filename)
         
-        frequency = data[frequency_key].flatten()
-        amplitude = data[amplitude_key]
-        time = data[time_key]
-        
-        # Find slice indices based on time values
-        min_idx = None
-        max_idx = None
-        if time_pro_min is not None:
-            min_idx = np.searchsorted(time, time_pro_min, side='left')
-        if time_pro_max is not None:
-            max_idx = np.searchsorted(time, time_pro_max, side='right')
-        
-        # Handle the slicing, allowing None for open-ended slices
-        sliced_amplitude = amplitude[min_idx:max_idx, :]
-        amplitude_average = np.average(sliced_amplitude, axis=0)
-        return frequency, amplitude_average
-    else:
+        if dialog.exec_() == QDialog.Accepted:
+            params = dialog.get_params()
+            frequency_key = params['frequency']
+            amplitude_key = params['amplitude']
+            time_key = params['time']
+            time_pro_min_str = params['time_px_min']
+            time_pro_max_str = params['time_px_max']
+           
+            # Convert min and max strings to floats or None
+            time_pro_min = float(time_pro_min_str) if time_pro_min_str.strip() else None
+            time_pro_max = float(time_pro_max_str) if time_pro_max_str.strip() else None
+           
+            # 读取原始数据
+            frequency = data[frequency_key].flatten()
+            amplitude = data[amplitude_key]
+            time = data[time_key]
+           
+            # ==================== 关键修改：自动对齐频率维度 ====================
+            if amplitude.ndim == 2:
+                n_time, n_freq_amp = amplitude.shape
+                n_freq = len(frequency)
+
+                print(f"[handle_tiqnpz_data] Before alignment -> "
+                      f"amplitude: {amplitude.shape}, frequency: {n_freq}, time: {len(time)}")
+
+                # 最常见情况：frequency 比 amplitude 的频率维度多 1 个点
+                if n_freq == n_freq_amp + 1:
+                    frequency = frequency[:-1]   # 裁掉最后一个频率点
+                    print(f"[handle_tiqnpz_data] Warning: frequency length adjusted from {n_freq} "
+                          f"to {n_freq_amp} to match amplitude")
+                
+                # 较少见的情况：amplitude 多 1 个点
+                elif n_freq_amp == n_freq + 1:
+                    amplitude = amplitude[:, :-1]
+                    print(f"[handle_tiqnpz_data] Warning: amplitude frequency dimension adjusted "
+                          f"from {n_freq_amp} to {n_freq}")
+
+                # 时间维度必须匹配（如果不匹配则报错）
+                if n_time != len(time):
+                    # 如果 time 最后多一个点（你之前在 preview_plot 中常用[:-1]），这里也可以处理
+                    if len(time) == n_time + 1:
+                        time = time[:-1]
+                        print(f"[handle_tiqnpz_data] Warning: time trimmed from {len(time)+1} to {n_time}")
+                    else:
+                        raise ValueError(
+                            f"Time dimension mismatch: amplitude.shape[0]={n_time}, "
+                            f"time length={len(time)}"
+                        )
+
+                print(f"[handle_tiqnpz_data] After alignment  -> "
+                      f"amplitude: {amplitude.shape}, frequency: {len(frequency)}, time: {len(time)}")
+
+            # Find slice indices based on time values
+            min_idx = None
+            max_idx = None
+            if time_pro_min is not None:
+                min_idx = np.searchsorted(time, time_pro_min, side='left')
+            if time_pro_max is not None:
+                max_idx = np.searchsorted(time, time_pro_max, side='right')
+           
+            # Handle the slicing, allowing None for open-ended slices
+            sliced_amplitude = amplitude[min_idx:max_idx, :]
+            amplitude_average = np.average(sliced_amplitude, axis=0)
+            
+            return frequency, amplitude_average
+            
+        else:
+            return None, None
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if parent:
+            QMessageBox.critical(parent, "Data Processing Error", 
+                               f"Error processing TIQ NPZ data:\n{str(e)}")
         return None, None
 
 def handle_spectrumnpz_data(filename, parent=None):
