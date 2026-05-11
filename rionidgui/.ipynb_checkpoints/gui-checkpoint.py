@@ -37,13 +37,13 @@ class MainWindow(QWidget):
         self.rion_input.clear_sim_signal.connect(
             self.visualization_widget.clear_simulated_data
         )
-
+        
         # Set initial size ratios (% input, % visualization)
-        #splitter.setSizes([int(0.1*width), int(0.9*width)])
+        splitter.setSizes([int(0.1*width), int(0.9*width)])
         # Dynamically resize both widgets
         splitter.setStretchFactor(0, 1)  
         splitter.setStretchFactor(1, 2) 
-
+        
         # Create the main layout
         layout = QVBoxLayout()
         layout.addWidget(splitter)
@@ -51,7 +51,7 @@ class MainWindow(QWidget):
         
         # connect plot‐click signal to RionID_GUI’s stop slot
         self.visualization_widget.plotClicked.connect(self.rion_input.onPlotClicked)
-
+        
         # Connect the RionID_GUI signal to update CreatePyGUI once data is available
         self.rion_input.visualization_signal.connect(self.update_visualization)
         # Connect the “overlay one simulation” signal so we don’t clear between curves

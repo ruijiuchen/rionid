@@ -386,10 +386,9 @@ class ImportData(object):
         else:
              for particle in self.particles_to_simulate:
                  ion_name = f'{particle[1]}{particle[0]}{particle[4][-1]}+'
-                 for ame in self.ame_data:
-                     #print("chenrj ame= ",ame)
-                     if particle[0] == ame[6] and particle[1] == ame[5]:
-                         pp = Particle(particle[2], particle[3], self.ame, self.ring)
+                 for ame in self.ame_data:                   
+                     if particle[0] == ame[6] and particle[2] == ame[4] and particle[3] == ame[3]:
+                         pp = Particle(particle[0], particle[2], particle[3], self.ame, self.ring)
                          pp.qq = particle[4][-1]
                          m_q = pp.get_ionic_moq_in_u()
                          self.protons[ion_name] = ame[4]
@@ -442,7 +441,6 @@ class ImportData(object):
        # If a scaling factor is provided, multiply yield_data by scalingfactor
        self.yield_data = np.array(self.yield_data, dtype=float)
        if sim_scalingfactor is not None:
-           
            self.yield_data *= sim_scalingfactor
        # Get nuclei name for labels
        # Simulate the expected measured frequency for each harmonic:

@@ -16,10 +16,8 @@ def import_controller(datafile=None, filep=None, remove_baseline = None, psd_bas
         elif mode == 'Bρ': brho = float(value)
         elif mode == 'Kinetic Energy': ke = float(value)
         elif mode == 'Gamma': gam = float(value)
-        
         # Calculations | ImportData library
         mydata = ImportData(refion, highlight_ions, remove_baseline, float(psd_baseline_removed_l),float(psd_baseline_removed_ratio), float(alphap), filename = datafile, reload_data = reload_data, circumference = circumference,peak_threshold_pct=peak_threshold_pct,min_distance=min_distance,matching_freq_min=matching_freq_min,matching_freq_max=matching_freq_max)
-        
         end_time1 = time.time()  # Record end time after each iteration
         elapsed_time1 = end_time1 - start_time  # Calculate elapsed time for this iteration
         if reload_data: 

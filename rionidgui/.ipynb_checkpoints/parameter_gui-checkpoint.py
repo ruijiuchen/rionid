@@ -569,8 +569,6 @@ class RionID_GUI(QWidget):
         try:
             print("Running script...")
             datafile = self.datafile_edit.text()
-            #if not datafile:
-            #    raise ValueError("No experimental data provided. Please enter any filename and click Run, the program will automatically calculate the simulated data.")
 
             filep = self.filep_edit.text()
             remove_baseline = self.remove_baseline_checkbox.isChecked()
@@ -590,7 +588,7 @@ class RionID_GUI(QWidget):
             nions = self.nions_edit.text()
             simulation_result= self.simulation_result_edit.text()
             matched_result= self.matched_result_edit.text()
-            
+
             try:
                 threshold = float(self.threshold_edit.text())
             except ValueError:
@@ -601,7 +599,6 @@ class RionID_GUI(QWidget):
             except ValueError:
                 raise ValueError("Please enter a valid number for matching_freq_min_edit")
                 raise ValueError("Please enter a valid number for matching_freq_max_edit")
-
             args = argparse.Namespace(datafile=datafile,
                                         filep=filep or None,
                                         remove_baseline = remove_baseline or None,
@@ -625,6 +622,7 @@ class RionID_GUI(QWidget):
                                         matching_freq_max=matching_freq_max,
                                         simulation_result=simulation_result
                                      )
+
             self.save_parameters()  # Save parameters before running the script
             # Simulate controller execution and emit data
             data = import_controller(**vars(args))
