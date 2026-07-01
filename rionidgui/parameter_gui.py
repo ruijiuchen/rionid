@@ -158,19 +158,6 @@ class RionID_GUI(QWidget):
         self.vbox.addLayout(hbox1)
         self.vbox.addLayout(hbox2)
 
-        # Read-only display of experimental data file path
-        self.datafile_path_label = QLabel('Data File Path:')
-        self.datafile_path_label.setFont(common_font)
-        self.datafile_path_display = QLineEdit()
-        self.datafile_path_display.setFont(common_font)
-        self.datafile_path_display.setReadOnly(True)
-        # Sync with datafile_edit content
-        self.datafile_edit.textChanged.connect(self.datafile_path_display.setText)
-        hbox_datafile_path = QHBoxLayout()
-        hbox_datafile_path.addWidget(self.datafile_path_label)
-        hbox_datafile_path.addWidget(self.datafile_path_display)
-        self.vbox.addLayout(hbox_datafile_path)
-
     def enterPlotPickMode(self, target: QLineEdit):
         self._plot_pick_target = target
         self._plot_pick_original_style = target.styleSheet()
@@ -415,7 +402,38 @@ class RionID_GUI(QWidget):
         hbox_threshold.addWidget(self.threshold_label)
         hbox_threshold.addWidget(self.threshold_edit)
         self.vbox.addLayout(hbox_threshold)
-        
+
+        # ──── Threshold Profile controls ────
+        self.thresh_profile_label = QLabel('Threshold Profile:')
+        self.thresh_profile_label.setFont(common_font)
+        self.thresh_profile_edit = QLineEdit()
+        self.thresh_profile_edit.setPlaceholderText("Select height_thresh.csv path...")
+        self.thresh_profile_edit.setFont(common_font)
+        self.thresh_profile_edit.textChanged.connect(
+            lambda path: self.visualization_widget._apply_threshold_path(path, refresh=False)
+        )
+
+        self.thresh_browse_button = QPushButton('Browse')
+        self.thresh_browse_button.setFont(common_font)
+        self.thresh_browse_button.clicked.connect(self._on_thresh_browse)
+
+        self.thresh_toggle_button = QPushButton('Start Click Threshold')
+        self.thresh_toggle_button.setFont(common_font)
+        self.thresh_toggle_button.clicked.connect(self._on_toggle_threshold_click)
+
+        # Connect signal from the visualization widget to update button state
+        self.visualization_widget.thresholdClickModeChanged.connect(self._on_threshold_click_mode_changed)
+
+        hbox_thresh_profile = QHBoxLayout()
+        hbox_thresh_profile.addWidget(self.thresh_profile_label)
+        hbox_thresh_profile.addWidget(self.thresh_profile_edit)
+        self.vbox.addLayout(hbox_thresh_profile)
+
+        hbox_thresh_buttons = QHBoxLayout()
+        hbox_thresh_buttons.addWidget(self.thresh_browse_button)
+        hbox_thresh_buttons.addWidget(self.thresh_toggle_button)
+        self.vbox.addLayout(hbox_thresh_buttons)
+
         # Optional feature fold group
         self.nions_label = QLabel('Number of ions to display:')
         self.nions_edit = QLineEdit()
@@ -626,6 +644,44 @@ class RionID_GUI(QWidget):
         except ValueError:
             return None
 
+    def _on_toggle_threshold_click(self):
+        """Handle Start Click Threshold button press."""
+        enabled = self.visualization_widget.toggle_threshold_click_mode()
+        self._update_thresh_toggle_button_style(enabled)
+
+    def _on_threshold_click_mode_changed(self, enabled):
+        """Slot for thresholdClickModeChanged signal from CreatePyGUI."""
+        self._update_thresh_toggle_button_style(enabled)
+
+    def _update_thresh_toggle_button_style(self, enabled):
+        """Update the Start Click Threshold button appearance."""
+        if enabled:
+            self.thresh_toggle_button.setText('Click Threshold: ON')
+            self.thresh_toggle_button.setStyleSheet('background-color: #90EE90;')
+        else:
+            self.thresh_toggle_button.setText('Start Click Threshold')
+            self.thresh_toggle_button.setStyleSheet('')
+
+    def _on_thresh_browse(self):
+        """Browse button handler for threshold profile file."""
+        current_data = self.visualization_widget.current_data
+        default_path = getattr(current_data, 'threshold_profile_path', '') if current_data is not None else ''
+        filename, _ = QFileDialog.getSaveFileName(self, 'Select height_thresh.csv', default_path, 'CSV Files (*.csv)')
+        if filename:
+            if not filename.lower().endswith('.csv'):
+                filename = f"{filename}.csv"
+            self.thresh_profile_edit.setText(filename)
+
+    def _sync_thresh_profile_path(self, data):
+        """Sync the threshold profile path display with the given data object."""
+        if data is not None:
+            path = getattr(data, 'threshold_profile_path', '') or ''
+            # Block signals to avoid recursive call to _apply_threshold_path
+            self.thresh_profile_edit.blockSignals(True)
+            self.thresh_profile_edit.setText(path)
+            self.thresh_profile_edit.blockSignals(False)
+
+
     def run_script(self):
         try:
             print("Running script...")
@@ -698,6 +754,8 @@ class RionID_GUI(QWidget):
                 )
                 data.save_matched_result(matched_result)
             self.visualization_signal.emit(data)
+            # Sync threshold profile path display
+            self._sync_thresh_profile_path(data)
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             log.error("Processing failed", exc_info=True)
@@ -986,6 +1044,7 @@ class RionID_GUI(QWidget):
                 self.value_edit.setText(f"{best_fref:.2f}")
                 self.alphap_edit.setText(f"{best_alphap:.6f}")
                 self.overlay_sim_signal.emit(best_data)
+                self._sync_thresh_profile_path(best_data)
                 QApplication.processEvents()
                 # after inner loop, restore alphap style
                 self.alphap_edit.setStyleSheet(orig_alpha_style)

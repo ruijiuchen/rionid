@@ -2,7 +2,7 @@ import sys
 import os
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLabel, QDesktopWidget, QSpinBox
+from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLabel, QDesktopWidget, QSpinBox, QLineEdit
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import QLoggingCategory, Qt
 from PyQt5.QtCore import QEvent, pyqtSignal
@@ -31,6 +31,7 @@ class CreatePyGUI(QMainWindow):
     '''
     # signal to let the controller know the user clicked on the plot
     plotClicked = pyqtSignal()
+    thresholdClickModeChanged = pyqtSignal(bool)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -55,8 +56,6 @@ class CreatePyGUI(QMainWindow):
         self.experimental_data = None
         self.remove_baseline=None
         self._threshold_click_enabled = False
-        self.threshold_path_edit = None
-        self.threshold_toggle_button = None
         self.psd_baseline_removed = None
         self.psd_baseline = None
         
@@ -71,7 +70,7 @@ class CreatePyGUI(QMainWindow):
             if event.button() == Qt.LeftButton and getattr(self, '_threshold_click_enabled', False):
                 self._handle_plot_click(event)
                 self._threshold_click_enabled = False
-                self._update_threshold_toggle_button()
+                self.thresholdClickModeChanged.emit(False)
                 return True
             if event.button() == Qt.RightButton:
                 if self._handle_plot_right_click(event):
@@ -120,10 +119,6 @@ class CreatePyGUI(QMainWindow):
             print(f"Failed to refresh threshold profile from click: {exc}")
 
     def _get_threshold_path_from_ui(self):
-        if self.threshold_path_edit is not None:
-            text = self.threshold_path_edit.text().strip()
-            if text:
-                return text
         if self.current_data is not None:
             return getattr(self.current_data, 'threshold_profile_path', None)
         return None
@@ -131,8 +126,6 @@ class CreatePyGUI(QMainWindow):
     def _apply_threshold_path(self, path, refresh=True):
         if not path:
             return
-        if self.threshold_path_edit is not None:
-            self.threshold_path_edit.setText(path)
         if self.current_data is not None:
             self.current_data.threshold_profile_path = path
             self.current_data._load_threshold_profile(path)
@@ -144,24 +137,20 @@ class CreatePyGUI(QMainWindow):
         filename, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Select height_thresh.csv', default_path, 'CSV Files (*.csv)')
         if filename:
             if not filename.lower().endswith('.csv'):
-                filename = f"{filename}.csv"
+                filename = f'{filename}.csv'
             self._apply_threshold_path(filename, refresh=True)
 
     def toggle_threshold_click_mode(self):
         self._threshold_click_enabled = not self._threshold_click_enabled
-        self._update_threshold_toggle_button()
+        self.thresholdClickModeChanged.emit(self._threshold_click_enabled)
+        return self._threshold_click_enabled
 
-    def _update_threshold_toggle_button(self):
-        button = getattr(self, 'threshold_toggle_button', None)
-        if button is None:
-            return
-        enabled = getattr(self, '_threshold_click_enabled', False)
-        if enabled:
-            button.setText('Click Threshold: ON')
-            button.setStyleSheet('background-color: #90EE90;')
-        else:
-            button.setText('Start Click Threshold')
-            button.setStyleSheet('')
+    def toggle_threshold_visibility(self):
+        """Toggle visibility of the threshold profile curve and points."""
+        for item in (self.threshold_profile_line, self.threshold_profile_points):
+            if item is not None:
+                item.setVisible(not item.isVisible())
+
         
     def setup_ui(self):
         self.setWindowTitle('Schottky Signals Identifier')
@@ -266,11 +255,6 @@ class CreatePyGUI(QMainWindow):
         
         self.experimental_data_line = self.plot_widget.plot(self.x_exp, self.z_exp, pen=pg.mkPen('blue', width=3))
         self.legend.addItem(self.experimental_data_line, 'Experimental Data')
-
-        if self.threshold_path_edit is not None:
-            current_path = getattr(data, 'threshold_profile_path', None)
-            if current_path:
-                self.threshold_path_edit.setText(current_path)
 
         # Plot baseline and baseline-removed curves if available
         if self.remove_baseline:
@@ -416,6 +400,10 @@ class CreatePyGUI(QMainWindow):
     def updateData(self, data):
         print("Updating data in visualization GUI...")
         self.current_data = data  # New: Save current data
+        # Update data file path display
+        if hasattr(self, "datafile_path_display") and data is not None:
+            path = getattr(data, "filename", "") or ""
+            self.datafile_path_display.setText(path)
         self.clear_experimental_data()
         self.clear_simulated_data()
         self.plot_all_data(data)
@@ -703,35 +691,13 @@ class CreatePyGUI(QMainWindow):
         self.font_spinbox.valueChanged.connect(self.update_fonts)  # 绑定更新方法
         first_row_layout.addWidget(self.font_spinbox)
 
+        # Toggle Threshold visibility
+        toggle_thresh_button = QPushButton("Toggle Threshold")
+        toggle_thresh_button.clicked.connect(self.toggle_threshold_visibility)
+        toggle_thresh_button.setFont(font)
+        first_row_layout.addWidget(toggle_thresh_button)
+
         main_layout.addLayout(first_row_layout)
-
-        # 第二行: Threshold profile 交互编辑控件
-        second_row_layout = QHBoxLayout()
-
-        thresh_label = QLabel("Threshold Profile:")
-        thresh_label.setFont(font)
-        second_row_layout.addWidget(thresh_label)
-
-        self.threshold_path_edit = QtWidgets.QLineEdit()
-        self.threshold_path_edit.setPlaceholderText("Select height_thresh.csv path...")
-        self.threshold_path_edit.setFont(font)
-        self.threshold_path_edit.setReadOnly(False)
-        self.threshold_path_edit.textChanged.connect(
-            lambda path: self._apply_threshold_path(path, refresh=False)
-        )
-        second_row_layout.addWidget(self.threshold_path_edit)
-
-        select_thresh_button = QPushButton("Browse")
-        select_thresh_button.clicked.connect(self.select_threshold_file)
-        select_thresh_button.setFont(font)
-        second_row_layout.addWidget(select_thresh_button)
-
-        self.threshold_toggle_button = QPushButton("Start Click Threshold")
-        self.threshold_toggle_button.clicked.connect(self.toggle_threshold_click_mode)
-        self.threshold_toggle_button.setFont(font)
-        second_row_layout.addWidget(self.threshold_toggle_button)
-
-        main_layout.addLayout(second_row_layout)
 
 
 # Example Usage:
