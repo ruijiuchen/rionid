@@ -55,7 +55,7 @@ class RionID_GUI(QWidget):
                 self.matching_freq_max_edit.setText(str(parameters.get('matching_freq_max', '')))
                 self.fref_min_edit.setText(parameters.get('fref_min', ''))
                 self.fref_max_edit.setText(parameters.get('fref_max', ''))
-                self.peak_thresh_edit.setText(str(parameters.get('peak_threshold_pct', '')))
+                self.peak_thresh_value = float(parameters.get('peak_threshold_pct', 0.05))
                 self.min_distance_edit.setText(str(parameters.get('min_distance', '')))
                 self.harmonics_edit.setText(parameters.get('harmonics', ''))
                 self.ref_harmonic_edit.setText(parameters.get('ref_harmonic', ''))
@@ -88,7 +88,7 @@ class RionID_GUI(QWidget):
             'threshold': self.threshold_edit.text(),
             'matching_freq_min': self.matching_freq_min_edit.text(),
             'matching_freq_max': self.matching_freq_max_edit.text(),
-            'peak_threshold_pct': float(self.peak_thresh_edit.text()),
+            'peak_threshold_pct': self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05,
             'min_distance': float(self.min_distance_edit.text()),
             'fref_min': self.fref_min_edit.text(),
             'fref_max': self.fref_max_edit.text(),
@@ -157,6 +157,19 @@ class RionID_GUI(QWidget):
 
         self.vbox.addLayout(hbox1)
         self.vbox.addLayout(hbox2)
+
+        # Read-only display of experimental data file path
+        self.datafile_path_label = QLabel('Data File Path:')
+        self.datafile_path_label.setFont(common_font)
+        self.datafile_path_display = QLineEdit()
+        self.datafile_path_display.setFont(common_font)
+        self.datafile_path_display.setReadOnly(True)
+        # Sync with datafile_edit content
+        self.datafile_edit.textChanged.connect(self.datafile_path_display.setText)
+        hbox_datafile_path = QHBoxLayout()
+        hbox_datafile_path.addWidget(self.datafile_path_label)
+        hbox_datafile_path.addWidget(self.datafile_path_display)
+        self.vbox.addLayout(hbox_datafile_path)
 
     def enterPlotPickMode(self, target: QLineEdit):
         self._plot_pick_target = target
@@ -353,17 +366,7 @@ class RionID_GUI(QWidget):
         hbox_sf.addWidget(self.sim_scalingfactor_edit)
         # ——— Add the Run button *before* the Optional Features section ———
         self.vbox.addLayout(hbox_sf)
-        # Peak threshold (% of max)
-        self.peak_thresh_label = QLabel('Peak threshold (of max):')
-        self.peak_thresh_label.setFont(common_font)
-        self.peak_thresh_edit  = QLineEdit()
-        self.peak_thresh_edit.setFont(common_font)
-        # Peak threshold (% of max)
-        hbox_peak = QHBoxLayout()
-        hbox_peak.addWidget(self.peak_thresh_label)
-        hbox_peak.addWidget(self.peak_thresh_edit)
-        self.vbox.addLayout(hbox_peak)
-        
+
         self.min_distance_label = QLabel('Peak min distance (Hz):')
         self.min_distance_label.setFont(common_font)
         self.min_distance_edit  = QLineEdit()
@@ -633,7 +636,7 @@ class RionID_GUI(QWidget):
             psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
             psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
             alphap = float(self.alphap_edit.text())
-            peak_threshold_pct = float(self.peak_thresh_edit.text())
+            peak_threshold_pct = self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05
             min_distance = float(self.min_distance_edit.text())
             harmonics = self.harmonics_edit.text()
             refion = self.refion_edit.text()
@@ -773,7 +776,7 @@ class RionID_GUI(QWidget):
             psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
             psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
             alphap = float(self.alphap_edit.text())
-            peak_threshold_pct = float(self.peak_thresh_edit.text())
+            peak_threshold_pct = self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05
             min_distance = float(self.min_distance_edit.text())
             harmonics = self.harmonics_edit.text()
             refion = self.refion_edit.text()

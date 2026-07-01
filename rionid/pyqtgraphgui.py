@@ -354,7 +354,9 @@ class CreatePyGUI(QMainWindow):
                         new_label = self.to_superscript(mass) + elem + self.to_superscript(charge) + '⁺'
                     else:
                         new_label = label
-                    
+                    # Add harmonic number to the label
+                    new_label = f'{new_label} h{int(float(harmonic))}'
+
                     # Vertical line
                     line = self.plot_widget.plot([freq, freq], [1e-30, z_value], pen=pg.mkPen(color=label_color, width=1, style=Qt.DashLine))
                     # Text label at top with adjustable font size
@@ -393,35 +395,7 @@ class CreatePyGUI(QMainWindow):
                     f"γₜ = {data.gammat:.4f} ; "
                     f"χ² = {data.chi2:.1f} ; "
                     f"match_count = {int(data.match_count)}"
-                )            
-            # compute threshold
-            rel_height = getattr(data, 'peak_threshold_pct', 0.05)
-            rel_height = max(0.0, min(rel_height, 1.0))
-            if hasattr(self, 'z_exp') and self.z_exp is not None:
-                threshold_val = rel_height * np.max(self.z_exp)
-            else:
-                threshold_val = 0.01            
-            if self.plot_widget.plotItem.ctrl.logYCheck.isChecked():
-                pos = np.log10(threshold_val)
-            else:
-                pos = threshold_val
-                    
-            self.threshold_line = pg.InfiniteLine(
-                pos=pos, angle=0,
-                pen=pg.mkPen('blue', style=Qt.DashLine, width=1)
-            )
-            self.plot_widget.addItem(self.threshold_line)
-        
-            if self.saved_x_range is not None:
-                x0 = self.saved_x_range[0]
-            else:
-                x0 = 0        
-            self.threshold_label_item = pg.TextItem(
-                        html=f'<span style="color:blue;">Threshold = {rel_height*1:.1e}</span>',
-                        anchor=(0, 1)
-                    )
-            self.threshold_label_item.setPos(x0, pos)
-            self.plot_widget.addItem(self.threshold_label_item)
+                )
 
     def get_z_exp_at_freq(self, freq, freq_range):
         if len(self.x_exp) == 0 or len(self.z_exp) == 0:
