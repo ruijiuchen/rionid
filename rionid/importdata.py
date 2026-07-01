@@ -23,7 +23,7 @@ class ImportData(object):
     '''
     Model (MVC)
     '''
-    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l, psd_baseline_removed_ratio, alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None):
+    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l, psd_baseline_removed_ratio, alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None, ref_harmonic=None):
         self.simulated_data_dict = {}  # Make sure this is initialized
         # Argparser arguments
         self.harmonics=[]
@@ -53,6 +53,7 @@ class ImportData(object):
         self.threshold_profile_freqs = None
         self.threshold_profile_vals = None
         self._load_threshold_profile(self.threshold_profile_path)
+        self.ref_harmonic = ref_harmonic  # harmonic number of the reference frequency
         self.chi2= 0
         self.match_count=0
         self.min_distance=min_distance
@@ -96,7 +97,8 @@ class ImportData(object):
     def compute_matches(self,
                         match_threshold,
                         match_frequency_min=None,
-                        match_frequency_max=None):
+                        match_frequency_max=None,
+                        sim_items=None):
         """
         Match the experimental peaks in self.peak_freqs against the simulated spectrum,
         but only for exp_freq in [match_frequency_min, match_frequency_max] if those are set.
@@ -109,12 +111,13 @@ class ImportData(object):
         Returns:
             tuple: (chi2, match_count, self.highlight_ions)
         """
-        # Build list of (frequency, ion_name, harmonic, yield) from simulated_data_dict
-        sim_items = []
-        for harmonic_name, sdata in self.simulated_data_dict.items():
-            harmonic = int(float(harmonic_name))
-            for row in sdata:
-                sim_items.append((float(row[0]), row[2], harmonic, float(row[1])))  # 添加 harmonic_name 和产额
+        # Build list of (frequency, ion_name, harmonic, yield) from simulated_data_dict or external sim_items
+        if sim_items is None:
+            sim_items = []
+            for harmonic_name, sdata in self.simulated_data_dict.items():
+                harmonic = int(float(harmonic_name))
+                for row in sdata:
+                    sim_items.append((float(row[0]), row[2], harmonic, float(row[1])))  # 添加 harmonic_name 和产额
         sim_freqs = np.array([freq for freq, _, _, _ in sim_items])
         # Initialize accumulators
         chi2 = 0.0
@@ -172,7 +175,57 @@ class ImportData(object):
     
         return chi2, match_count, filtered_ions
 
-    
+
+    def scan_match(self, f_ref, alphap, harmonics, match_threshold,
+                   match_frequency_min=None, match_frequency_max=None,
+                   mode='Frequency', ref_harmonic=None):
+        """
+        Lightweight scan for a single (f_ref, alphap) combination.
+        Skips the full _simulated_data overhead — reuses self.moq, self.yield_data,
+        self.nuclei_names which must already be populated (via a prior
+        _simulated_data call or _build_particle_cache).
+
+        Returns:
+            tuple: (chi2, match_count, filtered_ions)
+        """
+        # Handle gammat conversion
+        alphap_val = float(alphap)
+        if alphap_val > 1:
+            alphap_val = 1 / alphap_val ** 2
+
+        # Update parameters and recalculate srrf (the only alphap-dependent part)
+        self.ref_frequency = f_ref
+        self.alphap = alphap_val
+        self.gammat = (1 / alphap_val) ** 0.5
+        self._calculate_srrf(fref=f_ref, correct=False)
+
+        # Build sim_items directly from srrf × harmonic (no yield_data rebuild)
+        sim_items = []
+        for harmonic in harmonics:
+            h = float(harmonic)
+            if mode == 'Frequency':
+                if ref_harmonic is not None and ref_harmonic != 0:
+                    f0 = f_ref / ref_harmonic
+                    harmonic_freqs = self.srrf * f0 * h
+                else:
+                    harmonic_freqs = self.srrf * f_ref
+            else:
+                # Bρ mode — not optimised for scan, fall back to _simulated_data path
+                return self.compute_matches(match_threshold,
+                                            match_frequency_min,
+                                            match_frequency_max)
+
+            for i, ion_name in enumerate(self.nuclei_names):
+                sim_items.append((harmonic_freqs[i], ion_name,
+                                  h, self.yield_data[i]))
+
+        # Delegate to the same matching logic
+        return self.compute_matches(
+            match_threshold,
+            match_frequency_min,
+            match_frequency_max,
+            sim_items=sim_items)
+
     def save_matched_result(self, output_file='best_match_details.csv'):
         """
         1) Compute γₜ for each matched ion by pairing it with its nearest‐frequency neighbor.
@@ -590,7 +643,13 @@ class ImportData(object):
        
            # get srf data
            if mode == 'Frequency':
-               harmonic_frequency = self.srrf * self.ref_frequency
+               # If ref_harmonic is given, compute the true revolution frequency f0,
+               # then multiply by the current harmonic to get the frequency at that harmonic.
+               if self.ref_harmonic is not None and self.ref_harmonic != 0:
+                   f0 = self.ref_frequency / self.ref_harmonic     # revolution frequency (harmonic = 1)
+                   harmonic_frequency = self.srrf * f0 * harmonic  # frequency at this harmonic
+               else:
+                   harmonic_frequency = self.srrf * self.ref_frequency
            elif mode == 'Bρ':
                 #harmonic_frequency = self.srrf * self.ref_frequency * harmonic
                 print("self.ref_frequency = ",self.ref_frequency)

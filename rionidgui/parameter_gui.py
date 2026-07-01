@@ -58,6 +58,7 @@ class RionID_GUI(QWidget):
                 self.peak_thresh_edit.setText(str(parameters.get('peak_threshold_pct', '')))
                 self.min_distance_edit.setText(str(parameters.get('min_distance', '')))
                 self.harmonics_edit.setText(parameters.get('harmonics', ''))
+                self.ref_harmonic_edit.setText(parameters.get('ref_harmonic', ''))
                 self.refion_edit.setText(parameters.get('refion', ''))
                 self.highlight_ions_edit.setText(parameters.get('highlight_ions', ''))
                 self.circumference_edit.setText(parameters.get('circumference', ''))
@@ -92,6 +93,7 @@ class RionID_GUI(QWidget):
             'fref_min': self.fref_min_edit.text(),
             'fref_max': self.fref_max_edit.text(),
             'harmonics': self.harmonics_edit.text(),
+            'ref_harmonic': self.ref_harmonic_edit.text(),
             'refion': self.refion_edit.text(),
             'highlight_ions': self.highlight_ions_edit.text(),
             'circumference': self.circumference_edit.text(),
@@ -285,19 +287,66 @@ class RionID_GUI(QWidget):
         hbox_alphap.addWidget(self.alphap_edit)
         self.vbox.addLayout(hbox_alphap)
 
-        # other parameters
-        for label, widget in (
-            (self.harmonics_label, self.harmonics_edit),
-            (self.refion_label, self.refion_edit)
-        ):
-            hb = QHBoxLayout()
-            hb.addWidget(label)
-            hb.addWidget(widget)
-            self.vbox.addLayout(hb)
-            
+
+
+        # --- Reference harmonic number and auto-calculation display ---
+        self.ref_harmonic_label = QLabel('Ref. Harmonic (e.g. 125):')
+        self.ref_harmonic_label.setFont(common_font)
+        self.ref_harmonic_edit = QLineEdit()
+        self.ref_harmonic_edit.setFont(common_font)
+
+        self.f0_label = QLabel('Fundamental f0 (Hz):')
+        self.f0_label.setFont(common_font)
+        self.f0_display = QLineEdit()
+        self.f0_display.setFont(common_font)
+        self.f0_display.setReadOnly(True)
+
+        self.harmonic_freqs_label = QLabel('Harmonic Frequencies (Hz):')
+        self.harmonic_freqs_label.setFont(common_font)
+        self.harmonic_freqs_display = QLineEdit()
+        self.harmonic_freqs_display.setFont(common_font)
+        self.harmonic_freqs_display.setReadOnly(True)
+
+        # --- Layouts in desired order ---
+        # 1) Reference Harmonic
+        hbox_ref_harmonic = QHBoxLayout()
+        hbox_ref_harmonic.addWidget(self.ref_harmonic_label)
+        hbox_ref_harmonic.addWidget(self.ref_harmonic_edit)
+        self.vbox.addLayout(hbox_ref_harmonic)
+
+        # 2) Fundamental frequency (calculated from ref_harmonic)
+        hbox_f0 = QHBoxLayout()
+        hbox_f0.addWidget(self.f0_label)
+        hbox_f0.addWidget(self.f0_display)
+        self.vbox.addLayout(hbox_f0)
+
+        # 3) Reference Ion
+        hbox_refion = QHBoxLayout()
+        hbox_refion.addWidget(self.refion_label)
+        hbox_refion.addWidget(self.refion_edit)
+        self.vbox.addLayout(hbox_refion)
+
+        # 4) Harmonics
+        hbox_harmonics = QHBoxLayout()
+        hbox_harmonics.addWidget(self.harmonics_label)
+        hbox_harmonics.addWidget(self.harmonics_edit)
+        self.vbox.addLayout(hbox_harmonics)
+
+        # 5) Harmonic Frequencies (calculated from harmonics)
+        hbox_harmonic_freqs = QHBoxLayout()
+        hbox_harmonic_freqs.addWidget(self.harmonic_freqs_label)
+        hbox_harmonic_freqs.addWidget(self.harmonic_freqs_display)
+        self.vbox.addLayout(hbox_harmonic_freqs)
+
+        # --- Connect auto-calculation signals ---
+        self.mode_combo.currentTextChanged.connect(self._update_harmonic_calculation)
+        self.value_edit.textChanged.connect(self._update_harmonic_calculation)
+        self.ref_harmonic_edit.textChanged.connect(self._update_harmonic_calculation)
+        self.harmonics_edit.textChanged.connect(self._update_harmonic_calculation)
+
         self.vbox.addWidget(self.highlight_ions_label)
         self.vbox.addWidget(self.highlight_ions_edit)
-        
+
         # Next, pack scaling‐factor and Run button together
         hbox_sf = QHBoxLayout()
         hbox_sf.addWidget(self.sim_scalingfactor_label)
@@ -566,6 +615,14 @@ class RionID_GUI(QWidget):
         if lppfile:
             self.filep_edit.setText(lppfile)
             
+    def _read_ref_harmonic(self):
+        """Read ref_harmonic_edit and return int, or None if empty/invalid."""
+        try:
+            text = self.ref_harmonic_edit.text().strip()
+            return int(text) if text else None
+        except ValueError:
+            return None
+
     def run_script(self):
         try:
             print("Running script...")
@@ -589,6 +646,7 @@ class RionID_GUI(QWidget):
             nions = self.nions_edit.text()
             simulation_result= self.simulation_result_edit.text()
             matched_result= self.matched_result_edit.text()
+            ref_harmonic = self._read_ref_harmonic()
 
             try:
                 threshold = float(self.threshold_edit.text())
@@ -621,7 +679,8 @@ class RionID_GUI(QWidget):
                                         saved_data=self.saved_data,
                                         matching_freq_min=matching_freq_min,
                                         matching_freq_max=matching_freq_max,
-                                        simulation_result=simulation_result
+                                        simulation_result=simulation_result,
+                                        ref_harmonic=ref_harmonic
                                      )
 
             self.save_parameters()  # Save parameters before running the script
@@ -641,7 +700,58 @@ class RionID_GUI(QWidget):
             log.error("Processing failed", exc_info=True)
             if hasattr(self, 'signalError'):
                 self.signalError.emit(str(e))
-            
+
+    def _update_harmonic_calculation(self):
+        """Auto-calculate fundamental frequency and per-harmonic frequencies
+        when in 'Frequency' mode.  Updates the two read‑only display fields."""
+        mode = self.mode_combo.currentText()
+        if mode != 'Frequency':
+            self.f0_display.clear()
+            self.harmonic_freqs_display.clear()
+            return
+
+        # 1) reference frequency
+        try:
+            f_ref = float(self.value_edit.text())
+        except (ValueError, AttributeError):
+            self.f0_display.clear()
+            self.harmonic_freqs_display.clear()
+            return
+
+        # 2) reference harmonic number
+        try:
+            h_ref = int(self.ref_harmonic_edit.text())
+        except (ValueError, AttributeError):
+            self.f0_display.clear()
+            self.harmonic_freqs_display.clear()
+            return
+
+        if h_ref <= 0:
+            return
+
+        # --- compute ---
+        f0 = f_ref / h_ref
+        self.f0_display.setText(f"{f0:.2f}")
+
+        # per‑harmonic frequencies
+        harm_text = self.harmonics_edit.text().strip()
+        if not harm_text:
+            self.harmonic_freqs_display.clear()
+            return
+
+        try:
+            harmonics = [int(h) for h in harm_text.split()]
+        except ValueError:
+            self.harmonic_freqs_display.setText("Invalid harmonics format")
+            self.harmonic_freqs_display.setStyleSheet("color: red;")
+            return
+
+        # Reset style in case it was previously red
+        self.harmonic_freqs_display.setStyleSheet("color: black;")
+
+        parts = [f"h{h}={f0 * h:.2f}" for h in harmonics]
+        self.harmonic_freqs_display.setText(", ".join(parts))
+
     def mousePressEvent(self, event):
         """
         Any mouse click on this widget will set the stop flag,
@@ -675,6 +785,7 @@ class RionID_GUI(QWidget):
             reload_data = self.reload_data_checkbox.isChecked()
             simulation_result= self.simulation_result_edit.text()
             matched_result= self.matched_result_edit.text()
+            ref_harmonic = self._read_ref_harmonic()
 
             try:
                 threshold = float(self.threshold_edit.text())
@@ -745,12 +856,58 @@ class RionID_GUI(QWidget):
             # Grab and remember the original styles so we can restore them later
             orig_value_style  = self.value_edit.styleSheet()
             orig_alpha_style  = self.alphap_edit.styleSheet()
-            reload_data = True
-            # Initialize first iteration flag
-            first_iteration = True
-        
-            #exp_peaks_hz_filtering.append(model.ref_frequency)    
-        
+
+            #exp_peaks_hz_filtering.append(model.ref_frequency)
+
+            # --- Convert harmonics string to list once ---
+            harmonics_list = [float(h) for h in harmonics.split()]
+
+            # --- Build a baseline ImportData (one time, loads particles + builds yield_data) ---
+            # Use the first filtered peak as the initial f_ref; actual scanning uses scan_match.
+            if not exp_peaks_hz_filtering:
+                QMessageBox.critical(self, "Error",
+                    "No experimental peaks found within the specified frequency range.\n"
+                    "Please adjust the frequency range.")
+                self.fref_min_edit.setStyleSheet("background-color: red;")
+                self.fref_max_edit.setStyleSheet("background-color: red;")
+                return
+
+            baseline_args = argparse.Namespace(
+                datafile=datafile,
+                filep=filep,
+                remove_baseline=remove_baseline,
+                psd_baseline_removed_l=psd_baseline_removed_l,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio,
+                alphap=alphap,
+                harmonics=harmonics,
+                refion=refion,
+                highlight_ions=highlight_ions,
+                nions=nions,
+                circumference=circumference,
+                mode='Frequency',
+                sim_scalingfactor=sim_scalingfactor,
+                value=exp_peaks_hz_filtering[0],
+                reload_data=True,
+                peak_threshold_pct=peak_threshold_pct,
+                min_distance=min_distance,
+                output_results=False,
+                saved_data=None,
+                matching_freq_min=matching_freq_min,
+                matching_freq_max=matching_freq_max,
+                simulation_result=simulation_result,
+                ref_harmonic=ref_harmonic
+            )
+            baseline = import_controller(**vars(baseline_args))
+            if baseline is None:
+                raise RuntimeError("Failed to build baseline ImportData for scanning.")
+            self.saved_data = baseline
+            QApplication.processEvents()
+
+            # Grab and remember original styles
+            orig_value_style = self.value_edit.styleSheet()
+            orig_alpha_style = self.alphap_edit.styleSheet()
+            results = []
+
             for f_ref in exp_peaks_hz_filtering:
                 QApplication.processEvents()
                 if self._stop_quick_pid:
@@ -758,72 +915,45 @@ class RionID_GUI(QWidget):
                     break
 
                 # Highlight current f_ref in the UI
-                self.value_edit.setStyleSheet("background-color: #fff8b0;")  
+                self.value_edit.setStyleSheet("background-color: #fff8b0;")
                 self.value_edit.setText(f"{f_ref:.2f}")
                 QApplication.processEvents()
 
                 # Inner loop over a range of test_alphap values
                 for test_alphap in np.arange(alphap_min, alphap_max + 1e-12, alphap_step):
-                    start_time = time.time()  # Record start time for each test_alphap iteration
                     if self._stop_quick_pid:
                         print("Quick‐PID scan was stopped by user click.")
                         break
-                    
+
                     # Update UI to show which alphap is being tested
                     self.alphap_edit.setStyleSheet("background-color: #b0fff8;")
                     self.alphap_edit.setText(f"{test_alphap:.6f}")
                     QApplication.processEvents()
 
-                    # Run simulation for this combination
-                    sim_args = argparse.Namespace(
-                        datafile=datafile,
-                        filep=filep,
-                        remove_baseline = remove_baseline,
-                        psd_baseline_removed_l = psd_baseline_removed_l,
-                        psd_baseline_removed_ratio = psd_baseline_removed_ratio,
+                    # --- Lightweight scan_match (no ImportData creation, no particle loop) ---
+                    chi2, match_count, highlights = baseline.scan_match(
+                        f_ref=f_ref,
                         alphap=test_alphap,
-                        harmonics=harmonics,
-                        refion=refion,
-                        highlight_ions=highlight_ions,
-                        nions=nions,
-                        circumference=circumference,
+                        harmonics=harmonics_list,
+                        match_threshold=threshold,
+                        match_frequency_min=matching_freq_min,
+                        match_frequency_max=matching_freq_max,
                         mode='Frequency',
-                        sim_scalingfactor=sim_scalingfactor,
-                        value=f_ref,
-                        reload_data=reload_data,
-                        peak_threshold_pct=peak_threshold_pct,
-                        min_distance=min_distance,
-                        output_results=False,
-                        saved_data=self.saved_data,
-                        matching_freq_min=matching_freq_min,
-                        matching_freq_max=matching_freq_max,
-                        simulation_result=simulation_result
+                        ref_harmonic=ref_harmonic,
                     )
-                    data_i = import_controller(**vars(sim_args))
-                    if data_i is None:
-                        continue
-                    
-                    chi2, match_count, highlights = data_i.compute_matches(threshold,matching_freq_min,matching_freq_max)
-                    results.append((f_ref, test_alphap, chi2, match_count,highlights))
-                    if first_iteration:
-                        self.saved_data = data_i
-                        self.overlay_sim_signal.emit(self.saved_data)
-                        first_iteration = False  # Set flag to False after the first iteration
-                    else:
-                        reload_data = False
-                    
-                    del data_i  # Clear memory by deleting data_i after each iteration
+                    results.append((f_ref, test_alphap, chi2, match_count, highlights))
 
+                # After inner loop: find best for this f_ref
                 sorted_results = sorted(results, key=lambda x: (-x[3], x[2]))
                 best_fref, best_alphap, best_chi2, best_match_count, best_match_ions = sorted_results[0]
-                
-                # Run simulation for this combination
+
+                # Run full simulation for the winning pair (for final visualization & output)
                 sim_args = argparse.Namespace(
                     datafile=datafile,
                     filep=filep,
-                    remove_baseline = remove_baseline,
-                    psd_baseline_removed_l = psd_baseline_removed_l,
-                    psd_baseline_removed_ratio = psd_baseline_removed_ratio,
+                    remove_baseline=remove_baseline,
+                    psd_baseline_removed_l=psd_baseline_removed_l,
+                    psd_baseline_removed_ratio=psd_baseline_removed_ratio,
                     alphap=best_alphap,
                     harmonics=harmonics,
                     refion=refion,
@@ -833,19 +963,20 @@ class RionID_GUI(QWidget):
                     mode='Frequency',
                     sim_scalingfactor=sim_scalingfactor,
                     value=best_fref,
-                    reload_data=reload_data,
+                    reload_data=False,
                     peak_threshold_pct=peak_threshold_pct,
                     min_distance=min_distance,
                     output_results=True,
                     saved_data=self.saved_data,
                     matching_freq_min=matching_freq_min,
                     matching_freq_max=matching_freq_max,
-                    simulation_result=simulation_result
+                    simulation_result=simulation_result,
+                    ref_harmonic=ref_harmonic
                 )
                 best_data = import_controller(**vars(sim_args))
-                best_chi2, best_match_count, best_match_ions = best_data.compute_matches(threshold,matching_freq_min,matching_freq_max)
+                best_chi2, best_match_count, best_match_ions = best_data.compute_matches(threshold, matching_freq_min, matching_freq_max)
                 best_data.save_matched_result(matched_result)
-                self.save_parameters()  # Save parameters before running the script
+                self.save_parameters()
                 print(f"\n→ Best: f_ref={best_fref:.2f}Hz, alphap={best_alphap:.4f}, χ²={best_chi2:.3e}, matches={best_match_count} {best_match_ions}")
                 
                 self.mode_combo.setCurrentText('Frequency')

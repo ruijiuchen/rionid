@@ -6,7 +6,7 @@ import time
 import numpy as np
 from PyQt5.QtWidgets import QMessageBox
 
-def import_controller(datafile=None, filep=None, remove_baseline = None, psd_baseline_removed_l = None,psd_baseline_removed_ratio = None, alphap=None, refion=None, highlight_ions=None, harmonics = None, nions = None, amplitude=None, circumference = None, mode=None, sim_scalingfactor=None, value=None, reload_data=None,peak_threshold_pct = None,min_distance=None,output_results=None,saved_data = None,matching_freq_min=None,matching_freq_max=None,simulation_result=None):
+def import_controller(datafile=None, filep=None, remove_baseline = None, psd_baseline_removed_l = None,psd_baseline_removed_ratio = None, alphap=None, refion=None, highlight_ions=None, harmonics = None, nions = None, amplitude=None, circumference = None, mode=None, sim_scalingfactor=None, value=None, reload_data=None,peak_threshold_pct = None,min_distance=None,output_results=None,saved_data = None,matching_freq_min=None,matching_freq_max=None,simulation_result=None, ref_harmonic=None):
     try:
         start_time = time.time()  # Record start time for each test_alphap iteration
         # initializations
@@ -17,7 +17,7 @@ def import_controller(datafile=None, filep=None, remove_baseline = None, psd_bas
         elif mode == 'Kinetic Energy': ke = float(value)
         elif mode == 'Gamma': gam = float(value)
         # Calculations | ImportData library
-        mydata = ImportData(refion, highlight_ions, remove_baseline, float(psd_baseline_removed_l),float(psd_baseline_removed_ratio), float(alphap), filename = datafile, reload_data = reload_data, circumference = circumference,peak_threshold_pct=peak_threshold_pct,min_distance=min_distance,matching_freq_min=matching_freq_min,matching_freq_max=matching_freq_max)
+        mydata = ImportData(refion, highlight_ions, remove_baseline, float(psd_baseline_removed_l),float(psd_baseline_removed_ratio), float(alphap), filename = datafile, reload_data = reload_data, circumference = circumference,peak_threshold_pct=peak_threshold_pct,min_distance=min_distance,matching_freq_min=matching_freq_min,matching_freq_max=matching_freq_max, ref_harmonic=ref_harmonic)
         end_time1 = time.time()  # Record end time after each iteration
         elapsed_time1 = end_time1 - start_time  # Calculate elapsed time for this iteration
         if reload_data: 
@@ -41,10 +41,15 @@ def import_controller(datafile=None, filep=None, remove_baseline = None, psd_bas
             display_nions(int(nions), mydata.yield_data, mydata.nuclei_names, mydata.simulated_data_dict, refion, harmonics)
         if output_results:
             logger.info(f'Simulation results (ordered by frequency) will be saved to simulation_result.out')
-        sort_index = argsort(mydata.srrf)
+        # sort_index is only valid for non‑truncated data;
+        # when nions truncated simulated_data_dict, let save_simulation_results sort internally.
+        if nions:
+            out_sort_index = None
+        else:
+            out_sort_index = argsort(mydata.srrf)
         # Save the results if output_results is True
         if output_results:
-            save_simulation_results(mydata,mode, harmonics, sort_index,simulation_result)
+            save_simulation_results(mydata,mode, harmonics, out_sort_index,simulation_result)
             logger.info(f'Succesfully saved!')
 
         return mydata # Returns the simulated spectrum data 
