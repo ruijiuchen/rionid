@@ -1,4 +1,6 @@
+import numpy as np
 from numpy import polyval, array, stack, append, sqrt, genfromtxt
+import os
 import sys
 import re
 
@@ -44,8 +46,13 @@ class ImportData(object):
         self.peak_heights = []
         self.gammats = []
         self.yield_data=[]
+        self.filename = filename
         # Data cache file path
         self.cache_file = self._get_cache_file_path(filename)
+        self.threshold_profile_path = self._get_threshold_profile_path(filename)
+        self.threshold_profile_freqs = None
+        self.threshold_profile_vals = None
+        self._load_threshold_profile(self.threshold_profile_path)
         self.chi2= 0
         self.match_count=0
         self.min_distance=min_distance
@@ -102,16 +109,17 @@ class ImportData(object):
         Returns:
             tuple: (chi2, match_count, self.highlight_ions)
         """
-        # Build list of (frequency, ion_name) from simulated_data_dict
+        # Build list of (frequency, ion_name, harmonic, yield) from simulated_data_dict
         sim_items = []
         for harmonic_name, sdata in self.simulated_data_dict.items():
             harmonic = int(float(harmonic_name))
             for row in sdata:
-                sim_items.append((float(row[0]), row[2], harmonic))  # 添加 harmonic_name
-        sim_freqs = np.array([freq for freq, _, _ in sim_items])
+                sim_items.append((float(row[0]), row[2], harmonic, float(row[1])))  # 添加 harmonic_name 和产额
+        sim_freqs = np.array([freq for freq, _, _, _ in sim_items])
         # Initialize accumulators
         chi2 = 0.0
         match_count = 0
+        total_weight = 0.0
         matched_ions        = []
         matched_sim_items   = []
         matched_sim_freqs   = []
@@ -133,7 +141,9 @@ class ImportData(object):
             idx  = np.argmin(np.abs(sim_freqs - exp_freq))
             diff = abs(sim_freqs[idx] - exp_freq)
             if diff <= match_threshold:
-                chi2 += diff**2
+                weight = max(1e-12, sim_items[idx][3])
+                chi2 += weight * diff**2
+                total_weight += weight
                 match_count += 1
                 matched_ions.append(sim_items[idx][1])
                 matched_sim_items.append(sim_items[idx])
@@ -142,8 +152,8 @@ class ImportData(object):
                 matched_peak_widths.append(width)
                 matched_peak_heights.append(height)
     
-        # Finalize chi²
-        chi2 = chi2 / match_count if match_count > 0 else float('inf')
+        # Finalize chi² using yield-weighted average
+        chi2 = chi2 / total_weight if total_weight > 0 else float('inf')
     
         # Deduplicate and filter out the reference ion
         unique_ions   = sorted(set(matched_ions))
@@ -227,6 +237,118 @@ class ImportData(object):
         print(f"Detailed match data saved to '{output_file}'")
         return self.gammats
 
+    def _get_parameters_cache_dir(self):
+        candidate_names = ["parameters_cache.toml", "parameters_cache"]
+        search_roots = [os.getcwd(), os.path.dirname(os.path.abspath(__file__))]
+
+        for root in search_roots:
+            current = root
+            while True:
+                for name in candidate_names:
+                    candidate = os.path.join(current, name)
+                    if os.path.exists(candidate):
+                        return current
+                parent = os.path.dirname(current)
+                if parent == current:
+                    break
+                current = parent
+
+        return os.getcwd()
+
+    def _get_threshold_profile_path(self, filename=None):
+        if filename is None:
+            return None
+        base, _ = os.path.splitext(os.path.basename(filename))
+        cache_dir = self._get_parameters_cache_dir()
+        return os.path.join(cache_dir, f"{base}_height_thresh.csv")
+
+    def _load_threshold_profile(self, threshold_path=None):
+        profile_path = threshold_path or self.threshold_profile_path
+        self.threshold_profile_path = profile_path
+        if not profile_path or not os.path.exists(profile_path):
+            self.threshold_profile_freqs = None
+            self.threshold_profile_vals = None
+            return False
+
+        try:
+            data = np.genfromtxt(profile_path, delimiter=',', comments='#', dtype=float)
+            if data.ndim == 1:
+                data = data.reshape(1, -1)
+            if data.size == 0 or data.shape[1] < 2:
+                raise ValueError("Threshold profile must have at least two columns: freq, threshold")
+
+            freqs = np.asarray(data[:, 0], dtype=float)
+            vals = np.asarray(data[:, 1], dtype=float)
+            valid = np.isfinite(freqs) & np.isfinite(vals)
+            freqs = freqs[valid]
+            vals = vals[valid]
+            if freqs.size == 0:
+                raise ValueError("Threshold profile contains no valid data")
+
+            order = np.argsort(freqs)
+            self.threshold_profile_freqs = freqs[order]
+            self.threshold_profile_vals = np.maximum(vals[order], 0.0)
+            print(f"Loaded threshold profile from {profile_path} with {len(self.threshold_profile_freqs)} points")
+            return True
+        except Exception as exc:
+            print(f"Warning: failed to load threshold profile from {profile_path}: {exc}")
+            self.threshold_profile_freqs = None
+            self.threshold_profile_vals = None
+            return False
+
+    def _save_threshold_profile(self, freqs=None, vals=None):
+        if not self.threshold_profile_path:
+            return None
+
+        if freqs is None:
+            freqs = self.threshold_profile_freqs
+        if vals is None:
+            vals = self.threshold_profile_vals
+        if freqs is None or vals is None or len(freqs) == 0 or len(vals) == 0:
+            return None
+
+        freqs = np.asarray(freqs, dtype=float)
+        vals = np.asarray(vals, dtype=float)
+        order = np.argsort(freqs)
+        freqs = freqs[order]
+        vals = np.maximum(vals[order], 0.0)
+
+        directory = os.path.dirname(self.threshold_profile_path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+
+        np.savetxt(
+            self.threshold_profile_path,
+            np.column_stack([freqs, vals]),
+            delimiter=',',
+            header='freq_hz,threshold',
+            comments=''
+        )
+        self.threshold_profile_freqs = freqs
+        self.threshold_profile_vals = vals
+        return self.threshold_profile_path
+
+    def update_threshold_profile_from_clicks(self, freq_hz, threshold_value):
+        if self.threshold_profile_path is None:
+            self.threshold_profile_path = self._get_threshold_profile_path(self.filename)
+
+        if self.threshold_profile_freqs is None or self.threshold_profile_vals is None:
+            self.threshold_profile_freqs = np.array([float(freq_hz)], dtype=float)
+            self.threshold_profile_vals = np.array([float(threshold_value)], dtype=float)
+        else:
+            matches = np.isclose(self.threshold_profile_freqs, float(freq_hz), rtol=1e-6, atol=1.0)
+            if np.any(matches):
+                idx = np.where(matches)[0][0]
+                self.threshold_profile_freqs[idx] = float(freq_hz)
+                self.threshold_profile_vals[idx] = float(threshold_value)
+            else:
+                self.threshold_profile_freqs = np.append(self.threshold_profile_freqs, float(freq_hz))
+                self.threshold_profile_vals = np.append(self.threshold_profile_vals, float(threshold_value))
+
+        self._save_threshold_profile(self.threshold_profile_freqs, self.threshold_profile_vals)
+        print(f"Updated threshold profile at {freq_hz:.6g} Hz with value {threshold_value:.6g}")
+        return self.threshold_profile_path
+
     def _get_cache_file_path(self, filename):
         base, _ = os.path.splitext(filename)
         return f"{base}_cache.npz"
@@ -300,17 +422,32 @@ class ImportData(object):
     def detect_peaks_and_widths(self):
         if self.experimental_data is None:
             return
-    
-        freq, amp = self.experimental_data
-    
-        # 2) set up your thresholds
+
+        if self.remove_baseline and self.psd_baseline_removed is not None:
+            freq, amp = self.psd_baseline_removed
+        else:
+            freq, amp = self.experimental_data
+
         rel_height = max(0.0, min(self.peak_threshold_pct, 1.0))
-        height_thresh = np.max(amp) * rel_height
+        if self.threshold_profile_freqs is not None and self.threshold_profile_vals is not None:
+            height_thresh = np.interp(
+                freq,
+                self.threshold_profile_freqs,
+                self.threshold_profile_vals,
+                left=self.threshold_profile_vals[0],
+                right=self.threshold_profile_vals[-1]
+            )
+            height_thresh = np.nan_to_num(height_thresh, nan=0.0, posinf=0.0, neginf=0.0)
+            height_thresh = np.maximum(height_thresh, 0.0)
+            print(f"Using frequency-dependent threshold profile from {self.threshold_profile_path}")
+        else:
+            height_thresh = np.full_like(amp, np.max(amp) * rel_height, dtype=float)
+            print("Using fallback constant threshold based on peak_threshold_pct")
+    
         min_dist    = float(self.min_distance)
-        min_prom    = height_thresh * 0.3      # e.g. at least 30% of your threshold
-        min_w       = 1                         # in samples, adjust to reject narrow spikes
+        min_prom    = np.maximum(height_thresh * 0.3, 0.0)
+        min_w       = 1
         
-        # 3) call find_peaks with prominence and minimum width
         peaks, props = find_peaks(
             amp,
             height=height_thresh,
@@ -350,8 +487,8 @@ class ImportData(object):
         )
     
         # optional: inspect what remains
-        print(f"Detected {len(peaks)} peaks after filtering by height={height_thresh:.2g}, "
-              f"prominence>={min_prom:.2g}, width>={min_w} samples.")
+        print(f"Detected {len(peaks)} peaks after filtering by threshold profile, "
+              f"prominence>={np.nanmax(min_prom):.2g}, width>={min_w} samples.")
 
     def _save_experimental_data(self):
         if self.experimental_data is not None:
@@ -377,15 +514,18 @@ class ImportData(object):
         
     def _calculate_moqs(self, particles = None):
         # Calculate the  moq from barion of the particles present in LISE file or of the particles introduced
+        print("chenrj _calculate_moqs  ..." )
         if particles:
              for particle in particles:
                  ion_name = f'{particle.tbl_aa}{particle.tbl_name}{particle.qq}+'
                  m_q = particle.get_ionic_moq_in_u()
                  self.moq[ion_name] = m_q
                  self.total_mass[ion_name] = m_q * particle.qq  # Calculate and store the total mass
+                 print("chenrj _calculate_moqs 2...",ion_name,"\t total mass",self.total_mass[ion_name] )
         else:
              for particle in self.particles_to_simulate:
                  ion_name = f'{particle[1]}{particle[0]}{particle[4][-1]}+'
+                 print("chenrj _calculate_moqs 3...",ion_name,"\t total mass")
                  for ame in self.ame_data:                   
                      if particle[0] == ame[6] and particle[2] == ame[4] and particle[3] == ame[3]:
                          pp = Particle(particle[0], particle[2], particle[3], self.ame, self.ring)
