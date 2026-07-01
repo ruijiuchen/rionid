@@ -1,4 +1,5 @@
 import sys
+import os
 import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLabel, QDesktopWidget, QSpinBox
@@ -41,15 +42,21 @@ class CreatePyGUI(QMainWindow):
         self.setup_ui()
         # install filter on the plot area only
         self.plot_widget.installEventFilter(self)
+        self._threshold_refresh_pending = False
         # New lists to store specific colored items
         self.red_lines = []     # For red lines
         self.green_points = []  # For green points (if any; adjust as needed)
         self.yellow_lines = []  # For yellow lines
         self.red_triangles = None  # For red triangles (peaks)
+        self.threshold_profile_line = None
+        self.threshold_profile_points = None
         self.use_exp_height = True  # New: Default to use experimental height
         self.current_data = None    # New: Store current data for redrawing
         self.experimental_data = None
         self.remove_baseline=None
+        self._threshold_click_enabled = False
+        self.threshold_path_edit = None
+        self.threshold_toggle_button = None
         self.psd_baseline_removed = None
         self.psd_baseline = None
         
@@ -61,10 +68,100 @@ class CreatePyGUI(QMainWindow):
         
     def eventFilter(self, obj, event):
         if obj is self.plot_widget and event.type() == QEvent.MouseButtonPress:
-            # emit a PyQt signal instead of eating it
+            if event.button() == Qt.LeftButton and getattr(self, '_threshold_click_enabled', False):
+                self._handle_plot_click(event)
+                self._threshold_click_enabled = False
+                self._update_threshold_toggle_button()
+                return True
+            if event.button() == Qt.RightButton:
+                if self._handle_plot_right_click(event):
+                    return True
             self.plotClicked.emit()
             return True
         return super().eventFilter(obj, event)
+
+    def _handle_plot_click(self, event):
+        pos = self.plot_widget.plotItem.vb.mapSceneToView(event.pos())
+        self._last_click_freq = float(pos.x())
+        if self.plot_widget.plotItem.ctrl.logYCheck.isChecked():
+            self._last_click_amp = float(10 ** pos.y())
+        else:
+            self._last_click_amp = float(pos.y())
+
+        if not hasattr(self, 'current_data') or self.current_data is None:
+            return
+
+        data = self.current_data
+        if data.experimental_data is None:
+            return
+
+        if getattr(data, 'remove_baseline', False) and getattr(data, 'psd_baseline_removed', None) is not None:
+            freq_axis, amp = data.psd_baseline_removed
+        else:
+            freq_axis, amp = data.experimental_data
+
+        if len(freq_axis) == 0:
+            return
+
+        freq_mhz = self._last_click_freq
+        freq_hz = freq_mhz * 1e6
+        if freq_hz <= 0:
+            return
+
+        try:
+            selected_path = self._get_threshold_path_from_ui()
+            if selected_path:
+                data.threshold_profile_path = selected_path
+                data._load_threshold_profile(selected_path)
+            data.update_threshold_profile_from_clicks(freq_hz, float(self._last_click_amp))
+            data.detect_peaks_and_widths()
+            self.updateData(data)
+        except Exception as exc:
+            print(f"Failed to refresh threshold profile from click: {exc}")
+
+    def _get_threshold_path_from_ui(self):
+        if self.threshold_path_edit is not None:
+            text = self.threshold_path_edit.text().strip()
+            if text:
+                return text
+        if self.current_data is not None:
+            return getattr(self.current_data, 'threshold_profile_path', None)
+        return None
+
+    def _apply_threshold_path(self, path, refresh=True):
+        if not path:
+            return
+        if self.threshold_path_edit is not None:
+            self.threshold_path_edit.setText(path)
+        if self.current_data is not None:
+            self.current_data.threshold_profile_path = path
+            self.current_data._load_threshold_profile(path)
+            if refresh:
+                self.updateData(self.current_data)
+
+    def select_threshold_file(self):
+        default_path = self._get_threshold_path_from_ui() or ''
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(self, 'Select height_thresh.csv', default_path, 'CSV Files (*.csv)')
+        if filename:
+            if not filename.lower().endswith('.csv'):
+                filename = f"{filename}.csv"
+            self._apply_threshold_path(filename, refresh=True)
+
+    def toggle_threshold_click_mode(self):
+        self._threshold_click_enabled = not self._threshold_click_enabled
+        self._update_threshold_toggle_button()
+
+    def _update_threshold_toggle_button(self):
+        button = getattr(self, 'threshold_toggle_button', None)
+        if button is None:
+            return
+        enabled = getattr(self, '_threshold_click_enabled', False)
+        if enabled:
+            button.setText('Click Threshold: ON')
+            button.setStyleSheet('background-color: #90EE90;')
+        else:
+            button.setText('Start Click Threshold')
+            button.setStyleSheet('')
         
     def setup_ui(self):
         self.setWindowTitle('Schottky Signals Identifier')
@@ -169,7 +266,36 @@ class CreatePyGUI(QMainWindow):
         
         self.experimental_data_line = self.plot_widget.plot(self.x_exp, self.z_exp, pen=pg.mkPen('blue', width=3))
         self.legend.addItem(self.experimental_data_line, 'Experimental Data')
-        
+
+        if self.threshold_path_edit is not None:
+            current_path = getattr(data, 'threshold_profile_path', None)
+            if current_path:
+                self.threshold_path_edit.setText(current_path)
+
+        # Plot baseline and baseline-removed curves if available
+        if self.remove_baseline:
+            if self.psd_baseline is not None:
+                baseline_x = self.psd_baseline[0] * 1e-6
+                baseline_y = self.psd_baseline[1]
+                self.baseline_line = self.plot_widget.plot(baseline_x, baseline_y, pen=pg.mkPen('orange', style=Qt.DashLine, width=2))
+                self.legend.addItem(self.baseline_line, 'Baseline')
+            if self.psd_baseline_removed is not None:
+                baseline_removed_x = self.psd_baseline_removed[0] * 1e-6
+                baseline_removed_y = self.psd_baseline_removed[1]
+                self.baseline_removed_line = self.plot_widget.plot(baseline_removed_x, baseline_removed_y, pen=pg.mkPen('magenta', style=Qt.DotLine, width=1))
+                self.legend.addItem(self.baseline_removed_line, 'Baseline Removed')
+
+        if getattr(data, 'threshold_profile_freqs', None) is not None and getattr(data, 'threshold_profile_vals', None) is not None:
+            threshold_x = data.threshold_profile_freqs * 1e-6
+            threshold_y = data.threshold_profile_vals
+            self.threshold_profile_line = self.plot_widget.plot(
+                threshold_x,
+                threshold_y,
+                pen=pg.mkPen('green', width=2, style=Qt.DashLine)
+            )
+            self.legend.addItem(self.threshold_profile_line, 'Threshold')
+            self._plot_threshold_profile_points(data)
+
         # --- Mark each detected peak with a red triangle ---
         # 1) Convert peak frequencies to MHz and get peak heights
         peak_x = data.peak_freqs * 1e-6
@@ -199,6 +325,7 @@ class CreatePyGUI(QMainWindow):
         highlight_ions = data.highlight_ions # Get the list of ions to highlight in green
         for i, (harmonic, sdata) in enumerate(self.simulated_data.items()):
             color = pg.intColor(i, hues=len(self.simulated_data))
+            line = None
             for entry in sdata:
                 freq = float(entry[0])*1e-6
                 label = entry[2]
@@ -257,16 +384,16 @@ class CreatePyGUI(QMainWindow):
                     elif label_color == 'yellow':
                         self.yellow_lines.append((line, text))
 
-            self.legend.addItem(line, f'Harmonic = {float(harmonic)} ; Bρ = {data.brho:.6f} [Tm].')
-            
-            self.legend.addItem(
-                line,
-                f"reference frequency = {data.ref_frequency:.2f} Hz ; "
-                f"αₚ = {data.alphap:.4f} ; "
-                f"γₜ = {data.gammat:.4f} ; "
-                f"χ² = {data.chi2:.1f} ; "
-                f"match_count = {int(data.match_count)}"
-            )            
+            if line is not None:
+                self.legend.addItem(line, f'Harmonic = {float(harmonic)} ; Bρ = {data.brho:.6f} [Tm].')
+                self.legend.addItem(
+                    line,
+                    f"reference frequency = {data.ref_frequency:.2f} Hz ; "
+                    f"αₚ = {data.alphap:.4f} ; "
+                    f"γₜ = {data.gammat:.4f} ; "
+                    f"χ² = {data.chi2:.1f} ; "
+                    f"match_count = {int(data.match_count)}"
+                )            
             # compute threshold
             rel_height = getattr(data, 'peak_threshold_pct', 0.05)
             rel_height = max(0.0, min(rel_height, 1.0))
@@ -319,6 +446,83 @@ class CreatePyGUI(QMainWindow):
         self.clear_simulated_data()
         self.plot_all_data(data)
 
+    def _plot_threshold_profile_points(self, data):
+        if self.threshold_profile_points is not None:
+            try:
+                self.plot_widget.removeItem(self.threshold_profile_points)
+            except Exception:
+                pass
+            self.threshold_profile_points = None
+
+        if getattr(data, 'threshold_profile_freqs', None) is None or getattr(data, 'threshold_profile_vals', None) is None:
+            return
+
+        threshold_x = data.threshold_profile_freqs * 1e-6
+        threshold_y = data.threshold_profile_vals
+        self.threshold_profile_points = self.plot_widget.plot(
+            threshold_x,
+            threshold_y,
+            pen=None,
+            symbol='star',
+            symbolBrush='green',
+            symbolPen=pg.mkPen('darkgreen', width=1),
+            symbolSize=14
+        )
+
+    def _handle_plot_right_click(self, event):
+        if self.current_data is None or self.current_data.threshold_profile_freqs is None:
+            return False
+
+        pos = self.plot_widget.plotItem.vb.mapSceneToView(event.pos())
+        click_freq_hz = float(pos.x()) * 1e6
+        click_y = float(pos.y())
+
+        freqs = self.current_data.threshold_profile_freqs
+        vals = self.current_data.threshold_profile_vals
+        if len(freqs) == 0:
+            return False
+
+        # Find the nearest threshold point in screen space
+        nearest_index = None
+        nearest_distance = float('inf')
+        for idx, (freq_hz, val) in enumerate(zip(freqs, vals)):
+            point_scene = self.plot_widget.plotItem.vb.mapViewToScene(pg.Point(freq_hz * 1e-6, val))
+            distance = ((point_scene.x() - event.pos().x())**2 + (point_scene.y() - event.pos().y())**2) ** 0.5
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_index = idx
+
+        # Only show menu when click is close enough to a threshold point
+        if nearest_index is None or nearest_distance > 12:
+            return False
+
+        menu = QtWidgets.QMenu(self.plot_widget)
+        delete_action = menu.addAction('Delete threshold point')
+        action = menu.exec_(event.screenPos().toPoint())
+        if action == delete_action:
+            self._delete_threshold_point(nearest_index)
+            return True
+        return False
+
+    def _delete_threshold_point(self, index):
+        if self.current_data is None:
+            return
+        freqs = np.array(self.current_data.threshold_profile_freqs, dtype=float)
+        vals = np.array(self.current_data.threshold_profile_vals, dtype=float)
+        if index < 0 or index >= len(freqs):
+            return
+        freqs = np.delete(freqs, index)
+        vals = np.delete(vals, index)
+        self.current_data.threshold_profile_freqs = freqs if len(freqs) > 0 else None
+        self.current_data.threshold_profile_vals = vals if len(vals) > 0 else None
+        if len(freqs) > 0:
+            self.current_data._save_threshold_profile(freqs, vals)
+        else:
+            if self.current_data.threshold_profile_path and os.path.exists(self.current_data.threshold_profile_path):
+                os.remove(self.current_data.threshold_profile_path)
+        self.current_data.detect_peaks_and_widths()
+        self.updateData(self.current_data)
+
     def clear_simulated_data(self):
         print("Clearing simulated data plots...")
         while self.simulated_items:
@@ -333,16 +537,31 @@ class CreatePyGUI(QMainWindow):
         self.yellow_lines = []
 
     def clear_experimental_data(self):
-        if hasattr(self, 'experimental_data_line'):
+        if hasattr(self, 'experimental_data_line') and self.experimental_data_line is not None:
             print("Clearing experimental data plot...")
             self.plot_widget.removeItem(self.experimental_data_line)
             self.legend.removeItem(self.experimental_data_line)
+        if hasattr(self, 'baseline_line') and self.baseline_line is not None:
+            self.plot_widget.removeItem(self.baseline_line)
+            self.legend.removeItem(self.baseline_line)
+        if hasattr(self, 'baseline_removed_line') and self.baseline_removed_line is not None:
+            self.plot_widget.removeItem(self.baseline_removed_line)
+            self.legend.removeItem(self.baseline_removed_line)
         if self.red_triangles:
             self.plot_widget.removeItem(self.red_triangles)
             self.legend.removeItem(self.red_triangles)
+        if hasattr(self, 'threshold_profile_line') and self.threshold_profile_line is not None:
+            self.plot_widget.removeItem(self.threshold_profile_line)
+            self.legend.removeItem(self.threshold_profile_line)
+        if hasattr(self, 'threshold_profile_points') and self.threshold_profile_points is not None:
+            self.plot_widget.removeItem(self.threshold_profile_points)
         self.experimental_data_line = None
         self.experimental_data = None
         self.red_triangles = None
+        self.baseline_line = None
+        self.baseline_removed_line = None
+        self.threshold_profile_line = None
+        self.threshold_profile_points = None
 
     def toggle_simulated_data(self):
         for line, text in self.simulated_items:
@@ -457,60 +676,88 @@ class CreatePyGUI(QMainWindow):
             self.updateData(self.current_data)
 
     def add_buttons(self, main_layout):
-        button_layout = QHBoxLayout()
-
         font = QFont("Times", 15)
         font.setBold(True)
+
+        first_row_layout = QHBoxLayout()
 
         toggle_sim_button = QPushButton("Toggle Simulated Data")
         toggle_sim_button.clicked.connect(self.toggle_simulated_data)
         toggle_sim_button.setFont(font)
-        button_layout.addWidget(toggle_sim_button)
+        first_row_layout.addWidget(toggle_sim_button)
 
         # New button for toggling annotations
         toggle_anno_button = QPushButton("Toggle Annotations")
         toggle_anno_button.clicked.connect(self.toggle_annotations)
         toggle_anno_button.setFont(font)
-        button_layout.addWidget(toggle_anno_button)
+        first_row_layout.addWidget(toggle_anno_button)
 
         # New button for toggling height source
         toggle_height_button = QPushButton("Toggle Height Source")
         toggle_height_button.clicked.connect(self.toggle_height_source)
         toggle_height_button.setFont(font)
-        button_layout.addWidget(toggle_height_button)
+        first_row_layout.addWidget(toggle_height_button)
 
         save_button = QPushButton("Save Plot")
         save_button.clicked.connect(self.save_plot_with_dialog)
         save_button.setFont(font)
-        button_layout.addWidget(save_button)
+        first_row_layout.addWidget(save_button)
 
         zoom_in_button = QPushButton("Zoom In")
         zoom_in_button.clicked.connect(lambda: self.plot_widget.getViewBox().scaleBy((0.5, 0.5)))
         zoom_in_button.setFont(font)
-        button_layout.addWidget(zoom_in_button)
+        first_row_layout.addWidget(zoom_in_button)
 
         zoom_out_button = QPushButton("Zoom Out")
         zoom_out_button.clicked.connect(lambda: self.plot_widget.getViewBox().scaleBy((2, 2)))
         zoom_out_button.setFont(font)
-        button_layout.addWidget(zoom_out_button)
+        first_row_layout.addWidget(zoom_out_button)
 
         # Button to reset the plot view
         reset_view_button = QPushButton("Reset View")
         reset_view_button.setFont(font)
         reset_view_button.clicked.connect(self.reset_view)
-        button_layout.addWidget(reset_view_button)
+        first_row_layout.addWidget(reset_view_button)
 
         # 新增: Font size spinbox
         font_label = QLabel("Font Size:")
         font_label.setFont(font)
-        button_layout.addWidget(font_label)
+        first_row_layout.addWidget(font_label)
         self.font_spinbox = QSpinBox()
         self.font_spinbox.setRange(10, 30)  # 范围 10-30
         self.font_spinbox.setValue(self.font_size)  # 初始值
         self.font_spinbox.valueChanged.connect(self.update_fonts)  # 绑定更新方法
-        button_layout.addWidget(self.font_spinbox)
+        first_row_layout.addWidget(self.font_spinbox)
 
-        main_layout.addLayout(button_layout)
+        main_layout.addLayout(first_row_layout)
+
+        # 第二行: Threshold profile 交互编辑控件
+        second_row_layout = QHBoxLayout()
+
+        thresh_label = QLabel("Threshold Profile:")
+        thresh_label.setFont(font)
+        second_row_layout.addWidget(thresh_label)
+
+        self.threshold_path_edit = QtWidgets.QLineEdit()
+        self.threshold_path_edit.setPlaceholderText("Select height_thresh.csv path...")
+        self.threshold_path_edit.setFont(font)
+        self.threshold_path_edit.setReadOnly(False)
+        self.threshold_path_edit.textChanged.connect(
+            lambda path: self._apply_threshold_path(path, refresh=False)
+        )
+        second_row_layout.addWidget(self.threshold_path_edit)
+
+        select_thresh_button = QPushButton("Browse")
+        select_thresh_button.clicked.connect(self.select_threshold_file)
+        select_thresh_button.setFont(font)
+        second_row_layout.addWidget(select_thresh_button)
+
+        self.threshold_toggle_button = QPushButton("Start Click Threshold")
+        self.threshold_toggle_button.clicked.connect(self.toggle_threshold_click_mode)
+        self.threshold_toggle_button.setFont(font)
+        second_row_layout.addWidget(self.threshold_toggle_button)
+
+        main_layout.addLayout(second_row_layout)
 
 
 # Example Usage:

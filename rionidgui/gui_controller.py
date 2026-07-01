@@ -136,7 +136,7 @@ def save_simulation_results(mydata, mode, harmonics, sort_index=None, filename='
                     f"{freq:<22.10f} "
                     f"{yield_pps:<16.4e} "
                     f"{moq:<18.12f} "
-                    f"{mass_mev:<18.3f}"
+                    f"{mass_mev:<18.6f}"
                 )
                 file.write(line + "\n")
             

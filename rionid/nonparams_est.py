@@ -72,6 +72,9 @@ class NONPARAMS_EST(object):
                 sys.exit()
         elif method == 'BrPLS':
             try:
+                ratio = kwargs.get('ratio', 1e-6)
+                nitermax = kwargs.get('nitermax', 50)
+                print(f"BrPLS parameters: l={l}, ratio={ratio}, nitermax={nitermax}")
                 return pls_method.BrPLS(l=l, **kwargs) # ratio
             except:
                 raise ValueError("Invalid value for args in PLS.BrPLS method.")
@@ -310,17 +313,33 @@ class PLS(object):
         D = sparse.diags([1,-2,1], [0,-1,-2], shape=(L, L-2))
         D = l * D.dot(D.transpose())
         w, z = np.ones(L), self.data.copy()
+        eps = np.finfo(float).eps
         warnings.filterwarnings("ignore")
-        for i in range(nitermax):
-            for i in range(nitermax):
+        for outer_i in range(nitermax):
+            for inner_i in range(nitermax):
                 W = sparse.spdiags(w, 0, L, L)
                 Z = W + D
                 zt = spsolve(Z, w*self.data)
                 d = self.data - zt
-                d_m, d_sigma = np.mean(d[d>0]), np.sqrt(np.mean(d[d<0]**2)) 
-                w = 1 / (1 + beta / (1 - beta) * np.sqrt(np.pi / 2) * d_sigma / d_m * (1 + sp.erf((d / d_sigma - d_sigma / d_m) / np.sqrt(2))) * np.exp((d / d_sigma - d_sigma / d_m)**2 / 2))
-                if np.sqrt(np.sum((z - zt)**2) / np.sum(z**2)) < ratio: break
+                d_m = np.mean(d[d>0]) if np.any(d > 0) else eps
+                d_sigma = np.sqrt(np.mean(d[d<0]**2)) if np.any(d < 0) else eps
+                d_m = max(d_m, eps)
+                d_sigma = max(d_sigma, eps)
+                arg = (d / d_sigma - d_sigma / d_m) / np.sqrt(2)
+                arg = np.clip(arg, -30, 30)
+                exp_arg2 = np.exp(np.minimum(arg**2, 700))
+                factor = beta / (1 - beta) * np.sqrt(np.pi / 2) * d_sigma / d_m
+                w = 1 / (1 + factor * (1 + sp.erf(arg)) * exp_arg2)
+                if np.isnan(w).any() or np.isinf(w).any():
+                    print(f"BrPLS warning: bad weights at outer={outer_i} inner={inner_i} d_m={d_m} d_sigma={d_sigma}")
+                    w = np.nan_to_num(w, nan=1.0, posinf=1.0, neginf=0.0)
+                w = np.clip(w, 0.0, 1.0)
+                if np.sum(z**2) == 0:
+                    break
+                if np.sqrt(np.sum((z - zt)**2) / np.sum(z**2)) < ratio:
+                    break
                 z = zt
-            if np.abs(beta + np.mean(w) - 1.) < ratio: break
+            if np.abs(beta + np.mean(w) - 1.) < ratio:
+                break
             beta = 1 - np.mean(w)
         return z

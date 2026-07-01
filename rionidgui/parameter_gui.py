@@ -21,6 +21,7 @@ class RionID_GUI(QWidget):
     visualization_signal = pyqtSignal(object)
     overlay_sim_signal    = pyqtSignal(object)           # new—just overlays one simulation
     clear_sim_signal      = pyqtSignal()           # ← new
+    signalError           = pyqtSignal(str)
     def __init__(self, plot_widget, *args, **kwargs):
         super().__init__()
         self.visualization_widget = plot_widget
@@ -627,15 +628,19 @@ class RionID_GUI(QWidget):
             # Simulate controller execution and emit data
             data = import_controller(**vars(args))
             self.saved_data = data
-            if data.experimental_data:
-                best_chi2, best_match_count, best_match_ions = data.compute_matches(threshold,matching_freq_min,matching_freq_max)
+            if data is not None and getattr(data, 'experimental_data', None) is not None:
+                best_chi2, best_match_count, best_match_ions = data.compute_matches(
+                    threshold,
+                    matching_freq_min,
+                    matching_freq_max,
+                )
                 data.save_matched_result(matched_result)
-            self.visualization_signal.emit(data)        
-    
+            self.visualization_signal.emit(data)
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             log.error("Processing failed", exc_info=True)
-            self.signalError.emit(str(e))
+            if hasattr(self, 'signalError'):
+                self.signalError.emit(str(e))
             
     def mousePressEvent(self, event):
         """
