@@ -48,6 +48,7 @@ class CreatePyGUI(QMainWindow):
         self.red_lines = []     # For red lines
         self.green_points = []  # For green points (if any; adjust as needed)
         self.yellow_lines = []  # For yellow lines
+        self.annotation_ref_highlight_items = []  # Black (ref ion) + Green (highlight ions) for toggle_annotations
         self.red_triangles = None  # For red triangles (peaks)
         self.threshold_profile_line = None
         self.threshold_profile_points = None
@@ -365,10 +366,13 @@ class CreatePyGUI(QMainWindow):
                     # Store in specific lists based on color
                     if label_color == 'red':
                         self.red_lines.append((line, text))
-                    elif label_color == 'green':
-                        self.green_points.append((line, text))  # Treating green lines/text as "points"
+                    elif label_color in ('green', 'black'):
+                        self.green_points.append((line, text))  # Green (highlight) + Black (reference) as one group
                     elif label_color == 'yellow':
                         self.yellow_lines.append((line, text))
+                    # Explicitly track reference + highlight ions for toggle_annotations
+                    if label == refion or (highlight_ions is not None and label in highlight_ions):
+                        self.annotation_ref_highlight_items.append((line, text))
 
             if line is not None:
                 self.legend.addItem(line, f'Harmonic = {float(harmonic)} ; Bρ = {data.brho:.6f} [Tm].')
@@ -497,6 +501,7 @@ class CreatePyGUI(QMainWindow):
         self.red_lines = []
         self.green_points = []
         self.yellow_lines = []
+        self.annotation_ref_highlight_items = []
 
     def clear_experimental_data(self):
         if hasattr(self, 'experimental_data_line') and self.experimental_data_line is not None:
@@ -535,14 +540,10 @@ class CreatePyGUI(QMainWindow):
         for line, text in self.red_lines:
             line.setVisible(not line.isVisible())
             text.setVisible(not text.isVisible())
-        # Toggle visibility of green points/lines
-        for item in self.green_points:
-            if isinstance(item, tuple):  # If stored as (line, text)
-                line, text = item
-                line.setVisible(not line.isVisible())
-                text.setVisible(not text.isVisible())
-            else:
-                item.setVisible(not item.isVisible())
+        # Toggle visibility of reference + highlight ions (black + green)
+        for line, text in self.annotation_ref_highlight_items:
+            line.setVisible(not line.isVisible())
+            text.setVisible(not text.isVisible())
         # Toggle visibility of yellow lines
         for line, text in self.yellow_lines:
             line.setVisible(not line.isVisible())
@@ -698,6 +699,18 @@ class CreatePyGUI(QMainWindow):
         first_row_layout.addWidget(toggle_thresh_button)
 
         main_layout.addLayout(first_row_layout)
+
+
+        # Data file path display (read-only)
+        self.datafile_path_label = QLabel("Data File Path:")
+        self.datafile_path_label.setFont(font)
+        self.datafile_path_display = QLineEdit()
+        self.datafile_path_display.setFont(font)
+        self.datafile_path_display.setReadOnly(True)
+        hbox_datafile_path = QHBoxLayout()
+        hbox_datafile_path.addWidget(self.datafile_path_label)
+        hbox_datafile_path.addWidget(self.datafile_path_display)
+        main_layout.addLayout(hbox_datafile_path)
 
 
 # Example Usage:

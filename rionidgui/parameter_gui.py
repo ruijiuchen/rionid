@@ -290,10 +290,13 @@ class RionID_GUI(QWidget):
 
 
         # --- Reference harmonic number and auto-calculation display ---
-        self.ref_harmonic_label = QLabel('Ref. Harmonic (e.g. 125):')
+        self.ref_harmonic_label = QLabel('Ref. Harmonic:')
         self.ref_harmonic_label.setFont(common_font)
         self.ref_harmonic_edit = QLineEdit()
         self.ref_harmonic_edit.setFont(common_font)
+        # Only allow a single positive integer (no spaces, no multiple numbers)
+        from PyQt5.QtGui import QIntValidator
+        self.ref_harmonic_edit.setValidator(QIntValidator(1, 100000, self))
 
         self.f0_label = QLabel('Fundamental f0 (Hz):')
         self.f0_label.setFont(common_font)
