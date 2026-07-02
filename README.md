@@ -16,7 +16,7 @@
 - [流程图](#流程图)
 - [参数说明](#参数说明)
 - [运行示例](#运行示例)
-- [Quick PID 自动扫描](#quick-pid-自动扫描)
+- [SMS mode 自动扫描](#sms-mode-自动扫描)
 - [阈值 Profile 交互编辑](#阈值-profile-交互编辑)
 - [支持的文件格式](#支持的文件格式)
 
@@ -66,7 +66,7 @@ rionid/
 │  │  │ Mode selector │  │  │  │  实验数据曲线 (蓝)   │  │  │
 │  │  │ 参数输入框    │  │  │  │  模拟峰竖线 (彩色)   │  │  │
 │  │  │ Run /         │  │  │  │  阈值线 / 基线      │  │  │
-│  │  │ Quick PID    │  │  │  │  峰标记 (红三角)    │  │  │
+│  │  │ SMS    │  │  │  │  峰标记 (红三角)    │  │  │
 │  │  │ Exit         │  │  │  │  图例 / 光标位置    │  │  │
 │  │  └───────────────┘  │  │  └─────────────────────┘  │  │
 │  │        Controller   │  │         View              │  │
@@ -126,7 +126,7 @@ rionid/
 | `_calculate_srrf(fref/brho/ke)` | 计算相对回旋频率 srrf |
 | `_simulated_data(harmonics, mode)` | 模拟各谐波的测量频率和产额 |
 | `compute_matches(threshold, ...)` | 将实验峰与模拟频率匹配，返回 χ² 和 match_count |
-| `scan_match(f_ref, alphap, ...)` | **轻量扫描**：复用粒子缓存，只重算 srrf 和频率（优化 Quick PID） |
+| `scan_match(f_ref, alphap, ...)` | **轻量扫描**：复用粒子缓存，只重算 srrf 和频率（优化 SMS） |
 | `save_matched_result(csv_path)` | 保存详细匹配结果到 CSV |
 | `reference_frequency(fref/brho/ke/gam)` | 计算参考粒子的回旋频率 |
 | `calc_ref_rev_frequency(...)` | 静态方法：根据 Bρ/KE/γ 计算回旋频率 |
@@ -212,7 +212,7 @@ f[i] = f_rev[i] × h                                # 第 h 次谐波频率
 |------|------|
 | `RionID_GUI` | 左侧参数面板 (QWidget) |
 | `run_script()` | "Run" 按钮：执行单次模拟 + 匹配 |
-| `quick_pid_script()` | "Run Quick PID"：自动扫描 f_ref 和 alphap |
+| `SMS_pid_script()` | "Run SMS"：自动扫描 f_ref 和 alphap |
 | `enterPlotPickMode()` | 进入图谱点击取频率模式 |
 | `_update_harmonic_calculation()` | 自动计算基频和各谐波频率 |
 
@@ -242,7 +242,7 @@ f[i] = f_rev[i] × h                                # 第 h 次谐波频率
      │                  │       │                  │
      │ Mode / αp / f_ref│       │  实验数据 (蓝)    │
      │ Harmonics / 离子  │       │  模拟峰竖线 (彩色)│
-     │ Run / Quick PID  │       │  峰标记 (红三角) │
+     │ Run / SMS  │       │  峰标记 (红三角) │
      │ Pick from plot   │       │  阈值线 / 基线    │
      └────────┬─────────┘       └──────────────────┘
               │
@@ -340,7 +340,7 @@ f[i] = f_rev[i] × h                                # 第 h 次谐波频率
 | **Sim. - Exp. max. distance (Hz)** | 匹配阈值：模拟频率与实验频率的最大允许偏差 |
 | **Second-order correction** | 二阶校正系数（a0 a1 a2） |
 
-### Quick PID 设置
+### SMS 设置
 
 | 参数 | 说明 |
 |------|------|
@@ -383,17 +383,17 @@ rionidgui
 9. **设置匹配阈值** — 如 `500` Hz
 10. 点击 **Run** 执行模拟与匹配
 
-### 3. Quick PID 自动扫描
+### 3. SMS mode 自动扫描
 
 自动扫描参考频率和 αp 的最佳组合：
 
-1. 在 **Quick PID Settings** 区域设置扫描范围：
+1. 在 **SMS mode Settings** 区域设置扫描范围：
    - αp min / max / step（如 `0.07 0.09 0.0005`）
    - Reference frequency min / max（如 `3.08e8 3.12e8`）
-2. 点击 **Run Quick PID**
+2. 点击 **Run SMS**
 3. 程序自动遍历所有组合，按 match_count 降序 / χ² 升序选择最佳参数
 
-**优化说明：** Quick PID 内层循环使用 `scan_match()` 轻量扫描方法，**只重算 srrf 和频率**，复用粒子数据缓存，避免每轮重建 ImportData 对象。扫描结果会自动绘制最佳匹配的频谱。
+**优化说明：** SMS 内层循环使用 `scan_match()` 轻量扫描方法，**只重算 srrf 和频率**，复用粒子数据缓存，避免每轮重建 ImportData 对象。扫描结果会自动绘制最佳匹配的频谱。
 
 ### 4. CLI 命令行模式
 
@@ -416,9 +416,9 @@ python -m rionid data.npz -b 5.8494 -r 80Kr35+ -psim particles.lpp -ap 0.0546 -h
 
 ---
 
-## Quick PID 自动扫描
+## SMS mode 自动扫描
 
-**Run Quick PID** 是自动寻找最佳物理参数的功能，其内部逻辑为：
+**Run SMS** 是自动寻找最佳物理参数的功能，其内部逻辑为：
 
 ### 扫描算法
 
@@ -438,7 +438,7 @@ best_fref, best_alphap, best_chi2, best_match_count = sorted_results[0]
 
 ### 优化设计
 
-普通模式每次迭代都重建 `ImportData`（含文件 I/O）。Quick PID 做了以下优化：
+普通模式每次迭代都重建 `ImportData`（含文件 I/O）。SMS 做了以下优化：
 
 - **外围一次性构建** `ImportData` 对象，加载粒子数据
 - **内层使用 `scan_match()`** — 只重算 `srrf` 和频率，无文件 I/O

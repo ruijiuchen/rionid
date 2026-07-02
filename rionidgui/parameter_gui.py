@@ -25,14 +25,14 @@ class RionID_GUI(QWidget):
     def __init__(self, plot_widget, *args, **kwargs):
         super().__init__()
         self.visualization_widget = plot_widget
-        self._stop_quick_pid = False
+        self._stop_SMS_pid = False
         self.initUI()
         self.load_parameters()  # Load parameters after initializing UI
         
     @pyqtSlot()
     def onPlotClicked(self):
         """Called when user clicks inside the plot area."""
-        self._stop_quick_pid = True        
+        self._stop_SMS_pid = True        
     
     def initUI(self):
         self.setup_layout()
@@ -469,7 +469,7 @@ class RionID_GUI(QWidget):
 
 
         
-        # ——— Quick PID 设置 ———
+        # ——— SMS mode 设置 ———
         # αₚ scan range
         self.alphap_min_label = QLabel('<i>α<sub>p</sub> or γ<sub>t</sub> min:</i>')
         self.alphap_min_edit  = QLineEdit()
@@ -512,44 +512,44 @@ class RionID_GUI(QWidget):
             lambda: self.enterPlotPickMode(target=self.fref_max_edit)
         )
         
-        # Group the above Quick PID controls together
-        quick_pid_group = QGroupBox("Quick PID Settings")
-        quick_pid_group.setFont(common_font)
-        qp_layout = QVBoxLayout()
+        # Group the above SMS mode controls together
+        SMS_pid_group = QGroupBox("SMS mode(Scan αₚ and ref-f range)")
+        SMS_pid_group.setFont(common_font)
+        SMS_layout = QVBoxLayout()
         # αₚ scan range
         hbox_alphap_min = QHBoxLayout()
         hbox_alphap_min.addWidget(self.alphap_min_label)
         hbox_alphap_min.addWidget(self.alphap_min_edit)
-        qp_layout.addLayout(hbox_alphap_min)       
+        SMS_layout.addLayout(hbox_alphap_min)       
         hbox_alphap_max = QHBoxLayout()
         hbox_alphap_max.addWidget(self.alphap_max_label)
         hbox_alphap_max.addWidget(self.alphap_max_edit)
-        qp_layout.addLayout(hbox_alphap_max)   
+        SMS_layout.addLayout(hbox_alphap_max)   
         hbox_alphap_step = QHBoxLayout()
         hbox_alphap_step.addWidget(self.alphap_step_label)
         hbox_alphap_step.addWidget(self.alphap_step_edit)
-        qp_layout.addLayout(hbox_alphap_step)  
+        SMS_layout.addLayout(hbox_alphap_step)  
         # reference frequency scan range
-        qp_layout.addWidget(self.fref_min_label)
+        SMS_layout.addWidget(self.fref_min_label)
         # make an HBox for those two
         hbox_ffref_min = QHBoxLayout()
         hbox_ffref_min.addWidget(self.fref_min_edit)
         hbox_ffref_min.addWidget(self.pick_fref_min_button)
         # then add that HBox into your existing vertical layout
-        qp_layout.addLayout(hbox_ffref_min)        
+        SMS_layout.addLayout(hbox_ffref_min)        
         # make an HBox for those two
-        qp_layout.addWidget(self.fref_max_label)
+        SMS_layout.addWidget(self.fref_max_label)
         hbox_ffref_max = QHBoxLayout()
         hbox_ffref_max.addWidget(self.fref_max_edit)
         hbox_ffref_max.addWidget(self.pick_fref_max_button)
         # then add that HBox into your existing vertical layout
-        qp_layout.addLayout(hbox_ffref_max)        
+        SMS_layout.addLayout(hbox_ffref_max)        
         
         
         
         # ——— Add 'Run Quick PID' button here ———
-        self.quick_pid_button = QPushButton('Run Quick PID')
-        self.quick_pid_button.setStyleSheet("""
+        self.SMS_pid_button = QPushButton('Run SMS')
+        self.SMS_pid_button.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
@@ -559,10 +559,10 @@ class RionID_GUI(QWidget):
                 background-color: #45a049;
             }
         """)
-        self.quick_pid_button.clicked.connect(self.quick_pid_script)
-        qp_layout.addWidget(self.quick_pid_button)
-        quick_pid_group.setLayout(qp_layout)
-        self.vbox.addWidget(quick_pid_group)
+        self.SMS_pid_button.clicked.connect(self.SMS_pid_script)
+        SMS_layout.addWidget(self.SMS_pid_button)
+        SMS_pid_group.setLayout(SMS_layout)
+        self.vbox.addWidget(SMS_pid_group)
 
         self.simulation_result_label = QLabel('Simulation result:')
         self.simulation_result_edit = QLineEdit()
@@ -819,14 +819,14 @@ class RionID_GUI(QWidget):
     def mousePressEvent(self, event):
         """
         Any mouse click on this widget will set the stop flag,
-        causing the quick_pid_script loops to exit.
+        causing the SMS_pid_script loops to exit.
         """
-        self._stop_quick_pid = True
+        self._stop_SMS_pid = True
         super().mousePressEvent(event)
         
-    def quick_pid_script(self):
+    def SMS_pid_script(self):
         try:
-            print("Running quick_pid_script…")
+            print("Running SMS_pid_script…")
             datafile = self.datafile_edit.text().strip()
             if not datafile:
                 raise ValueError("No experimental data provided.")
@@ -895,7 +895,7 @@ class RionID_GUI(QWidget):
             alphap_step = float(self.alphap_step_edit.text())
             
             # … your preamble: gather datafile, alphap, exp_peaks_hz, etc. …
-            self._stop_quick_pid = False
+            self._stop_SMS_pid = False
             QApplication.processEvents()  # allow pending events (like mousePressEvent) to fire
 
             results = []
@@ -974,7 +974,7 @@ class RionID_GUI(QWidget):
 
             for f_ref in exp_peaks_hz_filtering:
                 QApplication.processEvents()
-                if self._stop_quick_pid:
+                if self._stop_SMS_pid:
                     print("Quick‐PID scan was stopped by user click.")
                     break
 
@@ -985,7 +985,7 @@ class RionID_GUI(QWidget):
 
                 # Inner loop over a range of test_alphap values
                 for test_alphap in np.arange(alphap_min, alphap_max + 1e-12, alphap_step):
-                    if self._stop_quick_pid:
+                    if self._stop_SMS_pid:
                         print("Quick‐PID scan was stopped by user click.")
                         break
 
@@ -1058,8 +1058,8 @@ class RionID_GUI(QWidget):
 
         except Exception as e:
             # On any error, also ensure any highlight is reset if needed
-            QMessageBox.critical(self, "Quick PID Error", str(e))
-            log.error("quick_pid_script failed", exc_info=True)
+            QMessageBox.critical(self, "SMS Error", str(e))
+            log.error("SMS_pid_script failed", exc_info=True)
 
 class CollapsibleGroupBox(QGroupBox):
     def __init__(self, title="", parent=None):

@@ -38,7 +38,7 @@ class CreatePyGUI(QMainWindow):
         self.saved_x_range = None  
         self.saved_y_range = None 
         self.simulated_items = []
-        self._stop_quick_pid = False
+        self._stop_SMS_pid = False
         self.font_size = 20  # 新增: 默认字体大小参数
         self.setup_ui()
         # install filter on the plot area only
