@@ -1467,52 +1467,54 @@ class RionID_GUI(QWidget):
                 # After inner loop: find best for this f_ref
                 sorted_results = sorted(results, key=lambda x: (-x[3], x[2]))
                 best_fref, best_alphap, best_chi2, best_match_count, best_match_ions = sorted_results[0]
-
-                # Run full simulation for the winning pair (for final visualization & output)
-                sim_args = argparse.Namespace(
-                    datafile=datafile,
-                    filep=filep,
-                    remove_baseline=remove_baseline,
-                    psd_baseline_removed_l=psd_baseline_removed_l,
-                    psd_baseline_removed_ratio=psd_baseline_removed_ratio,
-                    alphap=best_alphap,
-                    harmonics=harmonics,
-                    refion=refion,
-                    highlight_ions=highlight_ions,
-                    nions=nions,
-                    circumference=circumference,
-                    mode='Frequency',
-                    sim_scalingfactor=sim_scalingfactor,
-                    value=best_fref,
-                    reload_data=False,
-                    peak_threshold_pct=peak_threshold_pct,
-                    min_distance=min_distance,
-                    output_results=True,
-                    saved_data=self.saved_data,
-                    matching_freq_min=matching_freq_min,
-                    matching_freq_max=matching_freq_max,
-                    simulation_result=simulation_result,
-                    ref_harmonic=ref_harmonic
-                )
-                best_data = import_controller(**vars(sim_args))
-                best_chi2, best_match_count, best_match_ions = best_data.compute_matches(threshold, matching_freq_min, matching_freq_max)
-                best_data.save_matched_result(matched_result)
-                self.save_parameters()
-                print(f"\n→ Best: f_ref={best_fref:.2f}Hz, alphap={best_alphap:.4f}, χ²={best_chi2:.3e}, matches={best_match_count} {best_match_ions}")
-                
-                self.mode_combo.setCurrentText('Frequency')
-                self.value_edit.setText(f"{best_fref:.2f}")
-                self.alphap_edit.setText(f"{best_alphap:.6f}")
-                self.overlay_sim_signal.emit(best_data)
-                self._sync_thresh_profile_path(best_data)
-                QApplication.processEvents()
-                # after inner loop, restore alphap style
+                print(f"  f_ref={best_fref:.2f}Hz → 当前最佳: αp={best_alphap:.6f}, χ²={best_chi2:.3e}, matches={best_match_count}")
                 self.alphap_edit.setStyleSheet(orig_alpha_style)
-                
-                # after outer loop, restore value style
+
+            # after outer loop: plot best result once
             self.sms_progress.setVisible(False)
             self.value_edit.setStyleSheet(orig_value_style)
-            self.save_parameters()  # Save parameters before running the script
+
+            sorted_results = sorted(results, key=lambda x: (-x[3], x[2]))
+            best_fref, best_alphap, best_chi2, best_match_count, best_match_ions = sorted_results[0]
+            print(f"\n→ 全局最佳: f_ref={best_fref:.2f}Hz, alphap={best_alphap:.6f}, χ²={best_chi2:.3e}, matches={best_match_count} {best_match_ions}")
+
+            # Run full simulation for the winning pair (for final visualization & output)
+            sim_args = argparse.Namespace(
+                datafile=datafile,
+                filep=filep,
+                remove_baseline=remove_baseline,
+                psd_baseline_removed_l=psd_baseline_removed_l,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio,
+                alphap=best_alphap,
+                harmonics=harmonics,
+                refion=refion,
+                highlight_ions=highlight_ions,
+                nions=nions,
+                circumference=circumference,
+                mode='Frequency',
+                sim_scalingfactor=sim_scalingfactor,
+                value=best_fref,
+                reload_data=False,
+                peak_threshold_pct=peak_threshold_pct,
+                min_distance=min_distance,
+                output_results=True,
+                saved_data=self.saved_data,
+                matching_freq_min=matching_freq_min,
+                matching_freq_max=matching_freq_max,
+                simulation_result=simulation_result,
+                ref_harmonic=ref_harmonic
+            )
+            best_data = import_controller(**vars(sim_args))
+            best_chi2, best_match_count, best_match_ions = best_data.compute_matches(threshold, matching_freq_min, matching_freq_max)
+            best_data.save_matched_result(matched_result)
+
+            self.mode_combo.setCurrentText('Frequency')
+            self.value_edit.setText(f"{best_fref:.2f}")
+            self.alphap_edit.setText(f"{best_alphap:.6f}")
+            self.overlay_sim_signal.emit(best_data)
+            self._sync_thresh_profile_path(best_data)
+            QApplication.processEvents()
+            self.save_parameters()
 
         except Exception as e:
             # On any error, also ensure any highlight is reset if needed
