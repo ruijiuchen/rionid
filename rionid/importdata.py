@@ -65,6 +65,7 @@ class ImportData(object):
         self.psd_baseline_removed_l=psd_baseline_removed_l
         self.psd_baseline_removed_ratio=psd_baseline_removed_ratio
         self.ref_frequency=0
+        self._baseline_applied = False
         # Get the experimental data
         if filename is not None:
             if reload_data:
@@ -225,6 +226,62 @@ class ImportData(object):
             match_frequency_min,
             match_frequency_max,
             sim_items=sim_items)
+
+    def scan_match_brho(self, brho, circumference, harmonics, match_threshold,
+                        match_frequency_min=None, match_frequency_max=None):
+        """
+        Lightweight scan for a single (brho, circumference) combination in Br mode.
+        Reuses self.moq, self.yield_data, self.nuclei_names from a prior
+        _simulated_data call.  Updates self.ring.circumference and self.brho,
+        then computes per-ion frequencies using the Br formula.
+
+        Returns:
+            tuple: (chi2, match_count, filtered_ions)
+        """
+        self.brho = brho
+        self.ring.circumference = circumference
+
+        moq_keys = list(self.moq.keys())
+        harmonic_freq_list = []
+        for harmonic in harmonics:
+            h = float(harmonic)
+            for ion_name in moq_keys:
+                try:
+                    _A, elem, q = self._parse_ion_name(ion_name)
+                    mass_u = AMEData.to_mev(self.moq[ion_name] * q)
+                    f_rev = ImportData.calc_ref_rev_frequency(
+                        ref_mass=mass_u,
+                        ring_circumference=self.ring.circumference,
+                        brho=brho,
+                        ref_charge=q
+                    )
+                    this_harmonic_freq = h * f_rev
+                    harmonic_freq_list.append(this_harmonic_freq)
+                except Exception:
+                    continue
+
+        # Build sim_items
+        n_ions = len(moq_keys)
+        n_harmonics = len(harmonics)
+        tiled_yield = np.tile(self.yield_data, n_harmonics)
+        tiled_names = np.tile(self.nuclei_names, n_harmonics)
+
+        sim_items = []
+        for idx in range(len(harmonic_freq_list)):
+            sim_items.append((
+                harmonic_freq_list[idx],
+                tiled_names[idx],
+                float(harmonics[idx // n_ions]),
+                tiled_yield[idx]
+            ))
+
+        # Delegate to the same matching logic
+        return self.compute_matches(
+            match_threshold,
+            match_frequency_min,
+            match_frequency_max,
+            sim_items=sim_items)
+
 
     def save_matched_result(self, output_file='best_match_details.csv'):
         """
@@ -426,7 +483,13 @@ class ImportData(object):
                 self.experimental_data = handle_spectrumnpz_data(filename)
             else:
                 self.experimental_data = handle_tiqnpz_data(filename)
-                
+
+        # ── 峰汇总文件 (.txt)：不包含完整频谱，直接解析预检测的峰列表 ──
+        if file_extension.lower() == '.txt':
+            self.load_peaks_summary(filename)
+            # experimental_data 保留为 None（无完整频谱），detect_peaks_and_widths 会跳过
+            return  # 无需走后续的基线去除 / 寻峰流程
+
         if self.remove_baseline:
             try:
                 if self.experimental_data is not None and len(self.experimental_data) == 2:
@@ -543,10 +606,93 @@ class ImportData(object):
         print(f"Detected {len(peaks)} peaks after filtering by threshold profile, "
               f"prominence>={np.nanmax(min_prom):.2g}, width>={min_w} samples.")
 
-    def _save_experimental_data(self):
-        if self.experimental_data is not None:
+    def load_peaks_summary(self, filepath):
+        """
+        载入 all_peaks_summary 格式的峰汇总文件（.txt），
+        直接读取预检测的峰频率、峰高和峰宽到 self.peak_freqs / peak_heights / peak_widths_freq。
+
+        文件格式（制表符分隔）:
+            总序号\t峰序号\t频率[MHz]\t峰高\tFWHM[MHz]\tstart[s]\tend[s]\t...
+        第 3 列 = 频率 (MHz)，第 4 列 = 峰高，第 5 列 = FWHM (MHz)
+
+        Parameters
+        ----------
+        filepath : str
+            峰汇总 .txt 文件路径
+        """
+        print("chenrj ...")
+        freq_list, amp_list, fwhm_list = [], [], []
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # 跳过空行、表头行、分隔线
+                if not line or line.startswith('总序号') or line.startswith('---'):
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                try:
+                    freq_list.append(float(parts[2]) * 1e6)   # MHz → Hz
+                    amp_list.append(float(parts[3]))           # 峰高（原始幅度）
+                    fwhm_list.append(float(parts[4]) * 1e6)    # FWHM MHz → Hz
+                except (ValueError, IndexError):
+                    continue
+
+        self.peak_freqs       = np.array(freq_list)
+        self.peak_heights     = np.array(amp_list)
+        self.peak_widths_freq = np.array(fwhm_list)
+
+        print(f"✅ 已从 {filepath} 载入 {len(self.peak_freqs)} 个峰 "
+              f"(频率范围 {self.peak_freqs.min()/1e6:.3f} – {self.peak_freqs.max()/1e6:.3f} MHz)")
+
+    def _get_experimental_data(self, filename):
+        if data is not None:
+            frequency, amplitude_avg = data
+            np.savez_compressed(self.cache_file, frequency=frequency, amplitude_avg=amplitude_avg)
+        elif self.experimental_data is not None:
             frequency, amplitude_avg = self.experimental_data
-            np.savez_compressed(self.cache_file, frequency=frequency, amplitude_avg=amplitude_avg)                        
+            np.savez_compressed(self.cache_file, frequency=frequency, amplitude_avg=amplitude_avg)
+
+    def apply_baseline_once(self):
+        """
+        Apply baseline removal to the experimental data ONCE and replace
+        self.experimental_data with the baseline-removed version.
+        The result is saved to the cache file so subsequent loads skip baseline removal.
+
+        Returns:
+            tuple (freq, baseline) if successful, None otherwise.
+        """
+        if self.experimental_data is None:
+            return None
+        try:
+            freq, psd = self.experimental_data
+            print("Applying baseline removal once...")
+            baseline = NONPARAMS_EST(psd).pls('BrPLS',
+                                              l=self.psd_baseline_removed_l,
+                                              ratio=self.psd_baseline_removed_ratio)
+            psd_removed = psd - baseline
+
+            if np.any(np.isnan(psd_removed)):
+                print("Baseline removal produced NaN values — aborting.")
+                return None
+
+            # Replace experimental_data with baseline-removed version
+            self.experimental_data = (freq, psd_removed)
+            self.psd_baseline = (freq, baseline)
+            self.psd_baseline_removed = (freq, psd_removed)
+
+            # Save to cache so subsequent loads use baseline-removed data
+            self._save_experimental_data()
+            # Mark baseline as already applied so GUI knows
+            self._baseline_applied = True
+
+            print("Baseline removal applied and cached ONCE. "
+                  "Subsequent runs will load baseline-removed data directly.")
+            return self.psd_baseline
+        except Exception as e:
+            print(f"Baseline removal failed: {e}")
+            return None
             
     def _load_experimental_data(self):
         if os.path.exists(self.cache_file):

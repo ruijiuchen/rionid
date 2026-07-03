@@ -26,13 +26,15 @@ class RionID_GUI(QWidget):
         super().__init__()
         self.visualization_widget = plot_widget
         self._stop_SMS_pid = False
+        self._stop_IMS_pid = False
         self.initUI()
         self.load_parameters()  # Load parameters after initializing UI
         
     @pyqtSlot()
     def onPlotClicked(self):
         """Called when user clicks inside the plot area."""
-        self._stop_SMS_pid = True        
+        self._stop_SMS_pid = True
+        self._stop_IMS_pid = True
     
     def initUI(self):
         self.setup_layout()
@@ -268,6 +270,14 @@ class RionID_GUI(QWidget):
         hbox_psd_baseline_removed_ratio.addWidget(self.psd_baseline_removed_ratio_label)
         hbox_psd_baseline_removed_ratio.addWidget(self.psd_baseline_removed_ratio_edit)
         self.vbox.addLayout(hbox_psd_baseline_removed_ratio)
+
+        # Apply baseline once button
+        self.apply_baseline_button = QPushButton('Apply Baseline Once')
+        self.apply_baseline_button.setFont(common_font)
+        self.apply_baseline_button.clicked.connect(self._apply_baseline_once)
+        hbox_apply_baseline = QHBoxLayout()
+        hbox_apply_baseline.addWidget(self.apply_baseline_button)
+        self.vbox.addLayout(hbox_apply_baseline)
 
         hbox_mode = QHBoxLayout()
         hbox_mode.addWidget(self.mode_label)
@@ -564,6 +574,83 @@ class RionID_GUI(QWidget):
         SMS_pid_group.setLayout(SMS_layout)
         self.vbox.addWidget(SMS_pid_group)
 
+        # ——— IMS mode (Bρ & circumference scan) ———
+        self.brho_min_label = QLabel('Bρ min (Tm):')
+        self.brho_min_edit  = QLineEdit()
+        self.brho_min_label.setFont(common_font)
+        self.brho_min_edit.setFont(common_font)
+
+        self.brho_max_label = QLabel('Bρ max (Tm):')
+        self.brho_max_edit  = QLineEdit()
+        self.brho_max_label.setFont(common_font)
+        self.brho_max_edit.setFont(common_font)
+
+        self.brho_step_label = QLabel('Bρ step (Tm):')
+        self.brho_step_edit  = QLineEdit()
+        self.brho_step_label.setFont(common_font)
+        self.brho_step_edit.setFont(common_font)
+
+        self.circ_min_label = QLabel('Circumference min (m):')
+        self.circ_min_edit  = QLineEdit()
+        self.circ_min_label.setFont(common_font)
+        self.circ_min_edit.setFont(common_font)
+
+        self.circ_max_label = QLabel('Circumference max (m):')
+        self.circ_max_edit  = QLineEdit()
+        self.circ_max_label.setFont(common_font)
+        self.circ_max_edit.setFont(common_font)
+
+        self.circ_step_label = QLabel('Circumference step (m):')
+        self.circ_step_edit  = QLineEdit()
+        self.circ_step_label.setFont(common_font)
+        self.circ_step_edit.setFont(common_font)
+
+        IMS_pid_group = QGroupBox("IMS mode(Scan Bρ and ring circumference)")
+        IMS_pid_group.setFont(common_font)
+        IMS_layout = QVBoxLayout()
+
+        hbox_brho_min = QHBoxLayout()
+        hbox_brho_min.addWidget(self.brho_min_label)
+        hbox_brho_min.addWidget(self.brho_min_edit)
+        IMS_layout.addLayout(hbox_brho_min)
+        hbox_brho_max = QHBoxLayout()
+        hbox_brho_max.addWidget(self.brho_max_label)
+        hbox_brho_max.addWidget(self.brho_max_edit)
+        IMS_layout.addLayout(hbox_brho_max)
+        hbox_brho_step = QHBoxLayout()
+        hbox_brho_step.addWidget(self.brho_step_label)
+        hbox_brho_step.addWidget(self.brho_step_edit)
+        IMS_layout.addLayout(hbox_brho_step)
+
+        hbox_circ_min = QHBoxLayout()
+        hbox_circ_min.addWidget(self.circ_min_label)
+        hbox_circ_min.addWidget(self.circ_min_edit)
+        IMS_layout.addLayout(hbox_circ_min)
+        hbox_circ_max = QHBoxLayout()
+        hbox_circ_max.addWidget(self.circ_max_label)
+        hbox_circ_max.addWidget(self.circ_max_edit)
+        IMS_layout.addLayout(hbox_circ_max)
+        hbox_circ_step = QHBoxLayout()
+        hbox_circ_step.addWidget(self.circ_step_label)
+        hbox_circ_step.addWidget(self.circ_step_edit)
+        IMS_layout.addLayout(hbox_circ_step)
+
+        self.IMS_pid_button = QPushButton('Run IMS')
+        self.IMS_pid_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.IMS_pid_button.clicked.connect(self.IMS_pid_script)
+        IMS_layout.addWidget(self.IMS_pid_button)
+        IMS_pid_group.setLayout(IMS_layout)
+        self.vbox.addWidget(IMS_pid_group)
+
         self.simulation_result_label = QLabel('Simulation result:')
         self.simulation_result_edit = QLineEdit()
         self.simulation_result_label.setFont(common_font)
@@ -646,6 +733,30 @@ class RionID_GUI(QWidget):
             return int(text) if text else None
         except ValueError:
             return None
+
+    def _apply_baseline_once(self):
+        """Apply baseline removal ONCE to the current experimental data.
+        The baseline-removed data replaces the cache, so subsequent runs
+        skip baseline removal automatically."""
+        if self.saved_data is None:
+            QMessageBox.information(self, "Info", "Please run the simulation first.")
+            return
+
+        data = self.saved_data
+        baseline = data.apply_baseline_once()
+        if baseline is None:
+            QMessageBox.critical(self, "Error", "Baseline removal failed.")
+            return
+
+        # Uncheck the checkbox so subsequent runs don't re-apply
+        self.remove_baseline_checkbox.setChecked(False)
+        # Force reload to use cached baseline-removed data next time
+        self.reload_data_checkbox.setChecked(False)
+
+        # Refresh the visualization with the new experimental data
+        self.visualization_widget.updateData(data)
+        print("Baseline applied once. Checkbox unchecked — subsequent runs will use cached data.")
+        QApplication.processEvents()
 
     def _on_toggle_threshold_click(self):
         """Handle Start Click Threshold button press."""
@@ -749,16 +860,19 @@ class RionID_GUI(QWidget):
             # Simulate controller execution and emit data
             data = import_controller(**vars(args))
             self.saved_data = data
-            if data is not None and getattr(data, 'experimental_data', None) is not None:
-                best_chi2, best_match_count, best_match_ions = data.compute_matches(
-                    threshold,
-                    matching_freq_min,
-                    matching_freq_max,
-                )
-                data.save_matched_result(matched_result)
-            self.visualization_signal.emit(data)
-            # Sync threshold profile path display
-            self._sync_thresh_profile_path(data)
+            if data is not None:
+                if getattr(data, 'experimental_data', None) is not None:
+                    best_chi2, best_match_count, best_match_ions = data.compute_matches(
+                        threshold,
+                        matching_freq_min,
+                        matching_freq_max,
+                    )
+                    data.save_matched_result(matched_result)
+                self.visualization_signal.emit(data)
+                # Sync threshold profile path display
+                self._sync_thresh_profile_path(data)
+            else:
+                print("⚠️ import_controller returned None, skipping visualization update.")
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             log.error("Processing failed", exc_info=True)
@@ -819,9 +933,10 @@ class RionID_GUI(QWidget):
     def mousePressEvent(self, event):
         """
         Any mouse click on this widget will set the stop flag,
-        causing the SMS_pid_script loops to exit.
+        causing the SMS_pid_script / IMS_pid_script loops to exit.
         """
         self._stop_SMS_pid = True
+        self._stop_IMS_pid = True
         super().mousePressEvent(event)
         
     def SMS_pid_script(self):
@@ -1060,6 +1175,196 @@ class RionID_GUI(QWidget):
             # On any error, also ensure any highlight is reset if needed
             QMessageBox.critical(self, "SMS Error", str(e))
             log.error("SMS_pid_script failed", exc_info=True)
+
+    def IMS_pid_script(self):
+        try:
+            print("Running IMS_pid_script...")
+            datafile = self.datafile_edit.text().strip()
+            if not datafile:
+                raise ValueError("No experimental data provided.")
+
+            # --- collect constant arguments once ---
+            filep = self.filep_edit.text() or None
+            remove_baseline = self.remove_baseline_checkbox.isChecked()
+            psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
+            psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
+            alphap = float(self.alphap_edit.text())
+            peak_threshold_pct = self.peak_thresh_value if hasattr(self, "peak_thresh_value") else 0.05
+            min_distance = float(self.min_distance_edit.text())
+            harmonics = self.harmonics_edit.text()
+            refion = self.refion_edit.text()
+            highlight_ions = self.highlight_ions_edit.text() or None
+            nions = self.nions_edit.text() or None
+            circumference = float(self.circumference_edit.text())
+            sim_scalingfactor = self.sim_scalingfactor_edit.text().strip()
+            sim_scalingfactor = float(sim_scalingfactor) if sim_scalingfactor else None
+            reload_data = self.reload_data_checkbox.isChecked()
+            simulation_result = self.simulation_result_edit.text()
+            matched_result = self.matched_result_edit.text()
+
+            try:
+                threshold = float(self.threshold_edit.text())
+            except ValueError:
+                raise ValueError("Please enter a valid number for matching threshold")
+            try:
+                matching_freq_min = float(self.matching_freq_min_edit.text())
+                matching_freq_max = float(self.matching_freq_max_edit.text())
+            except ValueError:
+                raise ValueError("Please enter a valid number for matching_freq_min_edit")
+
+            # --- Scan ranges ---
+            brho_min     = float(self.brho_min_edit.text() or "1")
+            brho_max     = float(self.brho_max_edit.text() or "10")
+            brho_step    = float(self.brho_step_edit.text() or "0.1")
+            circ_min     = float(self.circ_min_edit.text() or "100")
+            circ_max     = float(self.circ_max_edit.text() or "120")
+            circ_step    = float(self.circ_step_edit.text() or "1")
+
+            # If baseline was already applied once, skip re-loading / re-baseline
+            if self.saved_data is not None and getattr(self.saved_data, '_baseline_applied', False):
+                reload_data = False
+                remove_baseline = False
+
+            # --- 1) Load experimental data and detect peaks ---
+            model = ImportData(
+                refion=refion,
+                highlight_ions=highlight_ions,
+                remove_baseline=remove_baseline or None,
+                psd_baseline_removed_l=psd_baseline_removed_l or None,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
+                alphap=alphap,
+                filename=datafile,
+                reload_data=reload_data,
+                circumference=circumference,
+                peak_threshold_pct=peak_threshold_pct,
+                min_distance=min_distance,
+                matching_freq_min=matching_freq_min,
+                matching_freq_max=matching_freq_max
+            )
+            if not hasattr(model, "peak_freqs") or len(model.peak_freqs) == 0:
+                raise RuntimeError("Could not detect any experimental peaks.")
+            self.visualization_signal.emit(model)
+            print(f"Detected {len(model.peak_freqs)} experimental peaks.")
+
+            # --- Build baseline (load particles & moqs) ---
+            baseline_args = argparse.Namespace(
+                datafile=datafile,
+                filep=filep,
+                remove_baseline=remove_baseline,
+                psd_baseline_removed_l=psd_baseline_removed_l,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio,
+                alphap=alphap,
+                harmonics=harmonics,
+                refion=refion,
+                highlight_ions=highlight_ions,
+                nions=nions,
+                circumference=circumference,
+                mode="Bρ",
+                sim_scalingfactor=sim_scalingfactor,
+                value="5.0",
+                reload_data=reload_data,
+                peak_threshold_pct=peak_threshold_pct,
+                min_distance=min_distance,
+                output_results=False,
+                saved_data=None,
+                matching_freq_min=matching_freq_min,
+                matching_freq_max=matching_freq_max,
+                simulation_result=simulation_result
+            )
+            baseline = import_controller(**vars(baseline_args))
+            if baseline is None:
+                raise RuntimeError("Failed to build baseline ImportData for scanning.")
+            self.saved_data = baseline
+            QApplication.processEvents()
+
+            harmonics_list = [float(h) for h in harmonics.split()]
+            results = []
+            self._stop_IMS_pid = False
+            orig_value_style = self.value_edit.styleSheet()
+            # Switch mode to Bρ so value_edit shows the Bρ value during scan
+            self.mode_combo.setCurrentText("Bρ")
+            QApplication.processEvents()
+
+            for test_brho in np.arange(brho_min, brho_max + 1e-12, brho_step):
+                QApplication.processEvents()
+                if self._stop_IMS_pid:
+                    print("IMS scan was stopped by user click.")
+                    break
+
+                # Update UI to show current brho in the Mode: Br value field
+                self.value_edit.setStyleSheet("background-color: #b0fff8;")
+                self.value_edit.setText(f"{test_brho:.4f}")
+                QApplication.processEvents()
+
+                for test_circ in np.arange(circ_min, circ_max + 1e-12, circ_step):
+                    if self._stop_IMS_pid:
+                        print("IMS scan was stopped by user click.")
+                        break
+
+                    chi2, match_count, highlights = baseline.scan_match_brho(
+                        brho=test_brho,
+                        circumference=test_circ,
+                        harmonics=harmonics_list,
+                        match_threshold=threshold,
+                        match_frequency_min=matching_freq_min,
+                        match_frequency_max=matching_freq_max,
+                    )
+                    results.append((test_brho, test_circ, chi2, match_count, highlights))
+
+            # --- Find best result ---
+            if not results:
+                QMessageBox.critical(self, "IMS Error", "No results computed.")
+                return
+
+            sorted_results = sorted(results, key=lambda x: (-x[3], x[2]))
+            best_brho, best_circ, best_chi2, best_match_count, best_match_ions = sorted_results[0]
+
+            # --- Run full simulation for the winning pair ---
+            sim_args = argparse.Namespace(
+                datafile=datafile,
+                filep=filep,
+                remove_baseline=remove_baseline,
+                psd_baseline_removed_l=psd_baseline_removed_l,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio,
+                alphap=alphap,
+                harmonics=harmonics,
+                refion=refion,
+                highlight_ions=highlight_ions,
+                nions=nions,
+                circumference=best_circ,
+                mode="Bρ",
+                sim_scalingfactor=sim_scalingfactor,
+                value=str(best_brho),
+                reload_data=False,
+                peak_threshold_pct=peak_threshold_pct,
+                min_distance=min_distance,
+                output_results=True,
+                saved_data=self.saved_data,
+                matching_freq_min=matching_freq_min,
+                matching_freq_max=matching_freq_max,
+                simulation_result=simulation_result
+            )
+            best_data = import_controller(**vars(sim_args))
+            best_chi2, best_match_count, best_match_ions = best_data.compute_matches(
+                threshold, matching_freq_min, matching_freq_max
+            )
+            best_data.save_matched_result(matched_result)
+            self.save_parameters()
+            print(f"\n-> Best: Brho={best_brho:.4f}Tm, circ={best_circ:.4f}m, "
+                  f"chi2={best_chi2:.3e}, matches={best_match_count} {best_match_ions}")
+
+            self.value_edit.setStyleSheet(orig_value_style)
+            self.mode_combo.setCurrentText("Bρ")
+            self.value_edit.setText(f"{best_brho:.4f}")
+            self.circumference_edit.setText(f"{best_circ:.4f}")
+            self.overlay_sim_signal.emit(best_data)
+            self._sync_thresh_profile_path(best_data)
+            QApplication.processEvents()
+
+        except Exception as e:
+            QMessageBox.critical(self, "IMS Error", str(e))
+            log.error("IMS_pid_script failed", exc_info=True)
+
 
 class CollapsibleGroupBox(QGroupBox):
     def __init__(self, title="", parent=None):
