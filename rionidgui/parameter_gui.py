@@ -1,4 +1,7 @@
-from PyQt5.QtWidgets import QApplication,QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QFileDialog, QMessageBox, QGroupBox, QToolButton
+from PyQt5.QtWidgets import (QApplication,QWidget, QLabel, QLineEdit, QPushButton,
+                             QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox,
+                             QFileDialog, QMessageBox, QGroupBox, QToolButton,
+                             QDialog, QDoubleSpinBox, QDialogButtonBox, QSpinBox)
 from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtGui import QFont
 import toml
@@ -16,6 +19,129 @@ import time
 log.basicConfig(level=log.DEBUG)
 common_font = QFont()
 common_font.setPointSize(12) #font size
+
+
+class HistogramConfigDialog(QDialog):
+    """柱状图参数配置对话框：设置 x 轴范围、bin 宽度，支持预览。"""
+    def __init__(self, raw_freqs_hz, parent=None):
+        super().__init__(parent)
+        self.raw_freqs_hz = raw_freqs_hz
+        self.setWindowTitle("柱状图参数设置")
+        self.setMinimumWidth(400)
+
+        # 频率范围 (MHz)
+        self.freq_min_hz = float(raw_freqs_hz.min())
+        self.freq_max_hz = float(raw_freqs_hz.max())
+        freq_range_mhz = (self.freq_max_hz - self.freq_min_hz) / 1e6
+
+        layout = QVBoxLayout()
+
+        # --- x_min ---
+        h1 = QHBoxLayout()
+        h1.addWidget(QLabel("x 轴最小值 (MHz):"))
+        self.spin_min = QDoubleSpinBox()
+        self.spin_min.setDecimals(4)
+        self.spin_min.setRange(0, 10000)
+        self.spin_min.setValue(self.freq_min_hz / 1e6)
+        h1.addWidget(self.spin_min)
+        layout.addLayout(h1)
+
+        # --- x_max ---
+        h2 = QHBoxLayout()
+        h2.addWidget(QLabel("x 轴最大值 (MHz):"))
+        self.spin_max = QDoubleSpinBox()
+        self.spin_max.setDecimals(4)
+        self.spin_max.setRange(0, 10000)
+        self.spin_max.setValue(self.freq_max_hz / 1e6)
+        h2.addWidget(self.spin_max)
+        layout.addLayout(h2)
+
+        # --- bin 宽度 ---
+        h3 = QHBoxLayout()
+        h3.addWidget(QLabel("Bin 宽度 (MHz):"))
+        self.spin_bw = QDoubleSpinBox()
+        self.spin_bw.setDecimals(6)
+        self.spin_bw.setRange(1e-6, 1000)
+        self.spin_bw.setValue(freq_range_mhz / 200)  # default ~200 bins
+        h3.addWidget(self.spin_bw)
+        layout.addLayout(h3)
+
+        # 显示 bins 数量（只读）
+        h4 = QHBoxLayout()
+        h4.addWidget(QLabel("→ 对应 bins 数:"))
+        self.label_nbins = QLabel("200")
+        self.label_nbins.setFont(common_font)
+        h4.addWidget(self.label_nbins)
+        h4.addStretch()
+        layout.addLayout(h4)
+
+        # 连接信号：改变 x_min/x_max/bin_width 时更新 bins 数显示
+        self.spin_min.valueChanged.connect(self._update_nbins)
+        self.spin_max.valueChanged.connect(self._update_nbins)
+        self.spin_bw.valueChanged.connect(self._update_nbins)
+
+        # --- 按钮 ---
+        btn_layout = QHBoxLayout()
+        self.btn_preview = QPushButton("预览")
+        self.btn_preview.clicked.connect(self._preview)
+        btn_layout.addWidget(self.btn_preview)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        btn_layout.addWidget(button_box)
+        layout.addLayout(btn_layout)
+
+        self.setLayout(layout)
+        self._update_nbins()
+
+    def _update_nbins(self):
+        """根据当前范围/宽度计算并显示 bins 数"""
+        fmin = self.spin_min.value()
+        fmax = self.spin_max.value()
+        bw = self.spin_bw.value()
+        if bw > 0 and fmax > fmin:
+            nbins = int((fmax - fmin) / bw)
+            self.label_nbins.setText(str(max(nbins, 1)))
+        else:
+            self.label_nbins.setText("—")
+
+    def _preview(self):
+        """用当前参数绘制柱状图预览"""
+        import matplotlib.pyplot as plt
+        fmin = self.spin_min.value() * 1e6
+        fmax = self.spin_max.value() * 1e6
+        bw = self.spin_bw.value() * 1e6
+        if bw <= 0 or fmax <= fmin:
+            QMessageBox.warning(self, "参数错误", "请确保 x_max > x_min 且 bin 宽度 > 0")
+            return
+        nbins = max(int((fmax - fmin) / bw), 1)
+
+        # 过滤频率
+        mask = (self.raw_freqs_hz >= fmin) & (self.raw_freqs_hz <= fmax)
+        filtered = self.raw_freqs_hz[mask]
+        if len(filtered) == 0:
+            QMessageBox.warning(self, "无数据", "该范围内没有数据点")
+            return
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.hist(filtered / 1e6, bins=nbins, range=(fmin/1e6, fmax/1e6),
+                color='steelblue', edgecolor='white', alpha=0.8)
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Counts")
+        ax.set_title(f"柱状图预览 (bins={nbins}, n={len(filtered)})")
+        ax.grid(axis='y', alpha=0.3)
+        fig.tight_layout()
+        plt.show()
+
+    def get_params(self):
+        """返回 (freq_min_Hz, freq_max_Hz, bins)"""
+        fmin = self.spin_min.value() * 1e6
+        fmax = self.spin_max.value() * 1e6
+        bw = self.spin_bw.value() * 1e6
+        nbins = max(int((fmax - fmin) / bw), 1)
+        return fmin, fmax, nbins
+
 
 class RionID_GUI(QWidget):
     visualization_signal = pyqtSignal(object)
@@ -71,6 +197,16 @@ class RionID_GUI(QWidget):
                 self.nions_edit.setText(parameters.get('nions', ''))
                 self.simulation_result_edit.setText(parameters.get('simulation_result', ''))
                 self.matched_result_edit.setText(parameters.get('matched_result', ''))
+                self.brho_min_edit.setText(parameters.get('brho_min', ''))
+                self.brho_max_edit.setText(parameters.get('brho_max', ''))
+                self.brho_step_edit.setText(parameters.get('brho_step', ''))
+                self.circ_min_edit.setText(parameters.get('circ_min', ''))
+                self.circ_max_edit.setText(parameters.get('circ_max', ''))
+                self.circ_step_edit.setText(parameters.get('circ_step', ''))
+                # 恢复柱状图参数
+                self._hist_freq_min = parameters.get('hist_freq_min')
+                self._hist_freq_max = parameters.get('hist_freq_max')
+                self._hist_bins = parameters.get('hist_bins')
                 self.saved_data=None
                 
         except FileNotFoundError:
@@ -105,7 +241,16 @@ class RionID_GUI(QWidget):
             'reload_data': self.reload_data_checkbox.isChecked(),
             'nions': self.nions_edit.text(),
             'simulation_result': self.simulation_result_edit.text(),
-            'matched_result': self.matched_result_edit.text()
+            'matched_result': self.matched_result_edit.text(),
+            'brho_min': self.brho_min_edit.text(),
+            'brho_max': self.brho_max_edit.text(),
+            'brho_step': self.brho_step_edit.text(),
+            'circ_min': self.circ_min_edit.text(),
+            'circ_max': self.circ_max_edit.text(),
+            'circ_step': self.circ_step_edit.text(),
+            'hist_freq_min': getattr(self, '_hist_freq_min', None),
+            'hist_freq_max': getattr(self, '_hist_freq_max', None),
+            'hist_bins': getattr(self, '_hist_bins', None)
         }
         with open(filepath, 'w') as f:
             toml.dump(parameters, f)
@@ -193,7 +338,24 @@ class RionID_GUI(QWidget):
         self._plot_pick_original_style = None
         
     def setup_parameters(self):
-        
+        # ── 载入数据按钮 ──
+        self.load_data_button = QPushButton('📂 Load Data')
+        self.load_data_button.setFont(common_font)
+        self.load_data_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        self.load_data_button.clicked.connect(self.load_data)
+        hbox_load = QHBoxLayout()
+        hbox_load.addWidget(self.load_data_button)
+        self.vbox.addLayout(hbox_load)
+
         # Is the experimental data reloaded?
         self.reload_data_checkbox = QCheckBox('Reload Experimental Data')
         self.reload_data_checkbox.setFont(common_font)
@@ -259,7 +421,6 @@ class RionID_GUI(QWidget):
         self.value_edit = QLineEdit()
             
         # psd_baseline_removed_l parameters input
-        self.vbox.addWidget(self.reload_data_checkbox)
         self.vbox.addWidget(self.remove_baseline_checkbox)
         hbox_psd_baseline_removed_l = QHBoxLayout()
         hbox_psd_baseline_removed_l.addWidget(self.psd_baseline_removed_l_label)
@@ -278,6 +439,55 @@ class RionID_GUI(QWidget):
         hbox_apply_baseline = QHBoxLayout()
         hbox_apply_baseline.addWidget(self.apply_baseline_button)
         self.vbox.addLayout(hbox_apply_baseline)
+
+        # ──── Threshold Profile controls ────
+        self.thresh_profile_label = QLabel('Threshold Profile:')
+        self.thresh_profile_label.setFont(common_font)
+        self.thresh_profile_edit = QLineEdit()
+        self.thresh_profile_edit.setPlaceholderText("Select height_thresh.csv path...")
+        self.thresh_profile_edit.setFont(common_font)
+        self.thresh_profile_edit.textChanged.connect(
+            lambda path: self.visualization_widget._apply_threshold_path(path, refresh=False)
+        )
+
+        self.thresh_browse_button = QPushButton('Browse')
+        self.thresh_browse_button.setFont(common_font)
+        self.thresh_browse_button.clicked.connect(self._on_thresh_browse)
+
+        self.thresh_toggle_button = QPushButton('Start Click Threshold')
+        self.thresh_toggle_button.setFont(common_font)
+        self.thresh_toggle_button.clicked.connect(self._on_toggle_threshold_click)
+
+        # Connect signal from the visualization widget to update button state
+        self.visualization_widget.thresholdClickModeChanged.connect(self._on_threshold_click_mode_changed)
+
+        hbox_thresh_profile = QHBoxLayout()
+        hbox_thresh_profile.addWidget(self.thresh_profile_label)
+        hbox_thresh_profile.addWidget(self.thresh_profile_edit)
+        self.vbox.addLayout(hbox_thresh_profile)
+
+        hbox_thresh_buttons = QHBoxLayout()
+        hbox_thresh_buttons.addWidget(self.thresh_browse_button)
+        hbox_thresh_buttons.addWidget(self.thresh_toggle_button)
+        self.vbox.addLayout(hbox_thresh_buttons)
+
+        # ──── Find Peaks button ────
+        self.find_peaks_button = QPushButton('🔍 Find Peaks')
+        self.find_peaks_button.setFont(common_font)
+        self.find_peaks_button.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        self.find_peaks_button.clicked.connect(self._find_peaks)
+        hbox_find_peaks = QHBoxLayout()
+        hbox_find_peaks.addWidget(self.find_peaks_button)
+        self.vbox.addLayout(hbox_find_peaks)
 
         hbox_mode = QHBoxLayout()
         hbox_mode.addWidget(self.mode_label)
@@ -415,37 +625,6 @@ class RionID_GUI(QWidget):
         hbox_threshold.addWidget(self.threshold_label)
         hbox_threshold.addWidget(self.threshold_edit)
         self.vbox.addLayout(hbox_threshold)
-
-        # ──── Threshold Profile controls ────
-        self.thresh_profile_label = QLabel('Threshold Profile:')
-        self.thresh_profile_label.setFont(common_font)
-        self.thresh_profile_edit = QLineEdit()
-        self.thresh_profile_edit.setPlaceholderText("Select height_thresh.csv path...")
-        self.thresh_profile_edit.setFont(common_font)
-        self.thresh_profile_edit.textChanged.connect(
-            lambda path: self.visualization_widget._apply_threshold_path(path, refresh=False)
-        )
-
-        self.thresh_browse_button = QPushButton('Browse')
-        self.thresh_browse_button.setFont(common_font)
-        self.thresh_browse_button.clicked.connect(self._on_thresh_browse)
-
-        self.thresh_toggle_button = QPushButton('Start Click Threshold')
-        self.thresh_toggle_button.setFont(common_font)
-        self.thresh_toggle_button.clicked.connect(self._on_toggle_threshold_click)
-
-        # Connect signal from the visualization widget to update button state
-        self.visualization_widget.thresholdClickModeChanged.connect(self._on_threshold_click_mode_changed)
-
-        hbox_thresh_profile = QHBoxLayout()
-        hbox_thresh_profile.addWidget(self.thresh_profile_label)
-        hbox_thresh_profile.addWidget(self.thresh_profile_edit)
-        self.vbox.addLayout(hbox_thresh_profile)
-
-        hbox_thresh_buttons = QHBoxLayout()
-        hbox_thresh_buttons.addWidget(self.thresh_browse_button)
-        hbox_thresh_buttons.addWidget(self.thresh_toggle_button)
-        self.vbox.addLayout(hbox_thresh_buttons)
 
         # Optional feature fold group
         self.nions_label = QLabel('Number of ions to display:')
@@ -800,7 +979,6 @@ class RionID_GUI(QWidget):
         try:
             print("Running script...")
             datafile = self.datafile_edit.text()
-
             filep = self.filep_edit.text()
             remove_baseline = self.remove_baseline_checkbox.isChecked()
             psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
@@ -815,12 +993,10 @@ class RionID_GUI(QWidget):
             mode = self.mode_combo.currentText()
             sim_scalingfactor = float(self.sim_scalingfactor_edit.text())
             value = self.value_edit.text()
-            reload_data = self.reload_data_checkbox.isChecked()
             nions = self.nions_edit.text()
             simulation_result= self.simulation_result_edit.text()
             matched_result= self.matched_result_edit.text()
             ref_harmonic = self._read_ref_harmonic()
-
             try:
                 threshold = float(self.threshold_edit.text())
             except ValueError:
@@ -830,46 +1006,62 @@ class RionID_GUI(QWidget):
                 matching_freq_max = float(self.matching_freq_max_edit.text())
             except ValueError:
                 raise ValueError("Please enter a valid number for matching_freq_min_edit")
-                raise ValueError("Please enter a valid number for matching_freq_max_edit")
-            args = argparse.Namespace(datafile=datafile,
-                                        filep=filep or None,
-                                        remove_baseline = remove_baseline or None,
-                                        psd_baseline_removed_l=psd_baseline_removed_l or None,
-                                        psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
-                                        alphap=alphap or None,
-                                        harmonics=harmonics or None,
-                                        refion=refion or None,
-                                        highlight_ions=highlight_ions or None,
-                                        nions=nions or None,
-                                        circumference=circumference or None,
-                                        mode=mode or None,
-                                        sim_scalingfactor=sim_scalingfactor or None,
-                                        value=value or None,
-                                        reload_data=reload_data or None,
-                                        peak_threshold_pct=peak_threshold_pct,
-                                        min_distance = min_distance,
-                                        output_results=True,
-                                        saved_data=self.saved_data,
-                                        matching_freq_min=matching_freq_min,
-                                        matching_freq_max=matching_freq_max,
-                                        simulation_result=simulation_result,
-                                        ref_harmonic=ref_harmonic
-                                     )
 
-            self.save_parameters()  # Save parameters before running the script
-            # Simulate controller execution and emit data
+            # ── 使用已载入的数据（必须先点击「载入数据」）──
+            data = self._get_model(emit_signal=False)
+
+            args = argparse.Namespace(
+                datafile=datafile,
+                filep=filep or None,
+                remove_baseline=remove_baseline or None,
+                psd_baseline_removed_l=psd_baseline_removed_l or None,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
+                alphap=alphap or None,
+                harmonics=harmonics or None,
+                refion=refion or None,
+                highlight_ions=highlight_ions or None,
+                nions=nions or None,
+                circumference=circumference or None,
+                mode=mode or None,
+                sim_scalingfactor=sim_scalingfactor or None,
+                value=value or None,
+                reload_data=True,
+                peak_threshold_pct=peak_threshold_pct,
+                min_distance=min_distance,
+                output_results=True,
+                saved_data=self.saved_data,
+                matching_freq_min=matching_freq_min,
+                matching_freq_max=matching_freq_max,
+                simulation_result=simulation_result,
+                ref_harmonic=ref_harmonic,
+            )
+            self.save_parameters()
             data = import_controller(**vars(args))
-            self.saved_data = data
             if data is not None:
+                # 使用已检测到的峰（经过 Find Peaks 过滤），而不是文件中的全部原始数据
+                if (self.saved_data is not None
+                        and hasattr(self.saved_data, 'peak_freqs')
+                        and len(self.saved_data.peak_freqs) > 0
+                        and len(self.saved_data.peak_freqs) < len(data.peak_freqs)):
+                    data.peak_freqs = self.saved_data.peak_freqs.copy()
+                    h = self.saved_data
+                    data.peak_heights = (h.peak_heights.copy() if hasattr(h, 'peak_heights') and len(h.peak_heights) > 0
+                                         else np.ones_like(h.peak_freqs))
+                    data.peak_widths_freq = (h.peak_widths_freq.copy() if hasattr(h, 'peak_widths_freq') and len(h.peak_widths_freq) > 0
+                                             else np.full_like(h.peak_freqs, np.nan))
+                    print(f"♻️ 使用已检测的 {len(data.peak_freqs)} 个峰进行匹配")
+
                 if getattr(data, 'experimental_data', None) is not None:
                     best_chi2, best_match_count, best_match_ions = data.compute_matches(
-                        threshold,
-                        matching_freq_min,
-                        matching_freq_max,
+                        threshold, matching_freq_min, matching_freq_max,
                     )
                     data.save_matched_result(matched_result)
-                self.visualization_signal.emit(data)
-                # Sync threshold profile path display
+                    print(f"\n📊 匹配结果: χ² = {best_chi2:.4e}, 匹配数 = {best_match_count}")
+                    print(f"   匹配离子: {best_match_ions}")
+                    # 在 GUI 标题栏显示最佳匹配信息
+                    self.setWindowTitle(f"RionID+  χ²={best_chi2:.2e}  N={best_match_count}  {best_match_ions[:3] if best_match_ions else ''}")
+                # 仅传递匹配结果，不改变已载入的数据和柱状图
+                self.overlay_sim_signal.emit(data)
                 self._sync_thresh_profile_path(data)
             else:
                 print("⚠️ import_controller returned None, skipping visualization update.")
@@ -938,7 +1130,102 @@ class RionID_GUI(QWidget):
         self._stop_SMS_pid = True
         self._stop_IMS_pid = True
         super().mousePressEvent(event)
-        
+
+    def load_data(self):
+        """载入实验数据按钮的处理方法。"""
+        datafile = self.datafile_edit.text().strip()
+        if not datafile:
+            QMessageBox.warning(self, "警告", "请先选择实验数据文件 (Experimental Data File)")
+            return
+
+        # ── 峰汇总文件 (.txt)：弹出柱状图配置对话框 ──
+        hist_freq_min = None
+        hist_freq_max = None
+        hist_bins = None
+        if datafile.lower().endswith('.txt'):
+            raw_list = []
+            with open(datafile, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('总序号') or line.startswith('---'):
+                        continue
+                    parts = line.split()
+                    if len(parts) < 3:
+                        continue
+                    try:
+                        raw_list.append(float(parts[2]) * 1e6)
+                    except (ValueError, IndexError):
+                        continue
+            if raw_list:
+                raw_freqs = np.array(raw_list)
+                dialog = HistogramConfigDialog(raw_freqs, self)
+                if dialog.exec_() == QDialog.Accepted:
+                    hist_freq_min, hist_freq_max, hist_bins = dialog.get_params()
+                    self._hist_freq_min = hist_freq_min
+                    self._hist_freq_max = hist_freq_max
+                    self._hist_bins = hist_bins
+                else:
+                    print("⚠️ 用户取消了柱状图配置")
+                    return
+
+        # 构造 ImportData（始终重新读取文件）
+        refion = self.refion_edit.text()
+        highlight_ions = self.highlight_ions_edit.text()
+        remove_baseline = self.remove_baseline_checkbox.isChecked()
+        psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
+        psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
+        alphap = float(self.alphap_edit.text())
+        peak_threshold_pct = self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05
+        min_distance = float(self.min_distance_edit.text())
+        circumference = float(self.circumference_edit.text())
+        matching_freq_min = float(self.matching_freq_min_edit.text())
+        matching_freq_max = float(self.matching_freq_max_edit.text())
+
+        model = ImportData(
+            refion=refion, highlight_ions=highlight_ions,
+            remove_baseline=remove_baseline or None,
+            psd_baseline_removed_l=psd_baseline_removed_l or None,
+            psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
+            alphap=alphap, filename=datafile, reload_data=True,
+            circumference=circumference,
+            peak_threshold_pct=peak_threshold_pct,
+            min_distance=min_distance,
+            matching_freq_min=matching_freq_min,
+            matching_freq_max=matching_freq_max,
+            hist_freq_min=hist_freq_min,
+            hist_freq_max=hist_freq_max,
+            hist_bins=hist_bins,
+            skip_peak_detection=True
+        )
+        if not hasattr(model, 'peak_freqs') or len(model.peak_freqs) == 0:
+            raise RuntimeError("无法检测到实验峰，请检查数据文件。")
+        self.saved_data = model
+        self.visualization_signal.emit(model)
+        self._sync_thresh_profile_path(model)
+        self.save_parameters()
+        print(f"✅ 数据载入完成，共 {len(model.peak_freqs)} 个峰")
+
+    def _find_peaks(self):
+        """在已载入的数据上重新执行 peak detection 并更新绘图。"""
+        model = self._get_model(emit_signal=False)
+        try:
+            model.detect_peaks_and_widths()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Peak detection failed: {str(e)}")
+            return
+        print(f"✅ 寻峰完成: {len(model.peak_freqs)} 个峰")
+        self.visualization_signal.emit(model)
+
+    def _get_model(self, emit_signal=True):
+        """返回 self.saved_data，如果未载入数据则报错。"""
+        if (self.saved_data is None
+                or not hasattr(self.saved_data, 'peak_freqs')
+                or len(self.saved_data.peak_freqs) == 0):
+            raise RuntimeError("尚未载入实验数据，请先点击「📂 载入数据」按钮。")
+        if emit_signal:
+            self.visualization_signal.emit(self.saved_data)
+        return self.saved_data
+
     def SMS_pid_script(self):
         try:
             print("Running SMS_pid_script…")
@@ -961,7 +1248,6 @@ class RionID_GUI(QWidget):
             circumference = float(self.circumference_edit.text())
             sim_scalingfactor = self.sim_scalingfactor_edit.text().strip()
             sim_scalingfactor = float(sim_scalingfactor) if sim_scalingfactor else None
-            reload_data = self.reload_data_checkbox.isChecked()
             simulation_result= self.simulation_result_edit.text()
             matched_result= self.matched_result_edit.text()
             ref_harmonic = self._read_ref_harmonic()
@@ -975,33 +1261,15 @@ class RionID_GUI(QWidget):
                 matching_freq_max = float(self.matching_freq_max_edit.text())
             except ValueError:
                 raise ValueError("Please enter a valid number for matching_freq_min_edit")
-                raise ValueError("Please enter a valid number for matching_freq_max_edit")
-                
+
             fref_min = float(self.fref_min_edit.text() or '-inf')
             fref_max = float(self.fref_max_edit.text() or 'inf')
 
-            # --- 1) Load experimental data and detect peaks ---
-            model = ImportData(
-                refion=refion,
-                highlight_ions=highlight_ions,
-                remove_baseline = remove_baseline or None,
-                psd_baseline_removed_l=psd_baseline_removed_l or None,
-                psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
-                alphap=alphap,
-                filename=datafile,
-                reload_data=reload_data,
-                circumference=circumference,
-                peak_threshold_pct=peak_threshold_pct,
-                min_distance=min_distance,
-                matching_freq_min=matching_freq_min,
-                matching_freq_max=matching_freq_max
-            )
-            if not hasattr(model, 'peak_freqs') or len(model.peak_freqs) == 0:
-                raise RuntimeError("Could not detect any experimental peaks.")
-            self.visualization_signal.emit(model)
+            # --- 1) 使用已载入的数据 ---
+            model = self._get_model(emit_signal=False)
             # experimental peak frequencies (Hz)
             exp_peaks_hz = model.peak_freqs
-            
+
             print(f"Detected {len(exp_peaks_hz)} experimental peaks.")
 
             # define your alphap scan range
@@ -1079,6 +1347,17 @@ class RionID_GUI(QWidget):
             baseline = import_controller(**vars(baseline_args))
             if baseline is None:
                 raise RuntimeError("Failed to build baseline ImportData for scanning.")
+            # 恢复已检测的峰到 baseline 上，供 scan_match 使用
+            detected_peak_freqs = model.peak_freqs.copy() if hasattr(model, 'peak_freqs') and len(model.peak_freqs) > 0 else None
+            detected_peak_heights = model.peak_heights.copy() if hasattr(model, 'peak_heights') and len(model.peak_heights) > 0 else None
+            detected_peak_widths = model.peak_widths_freq.copy() if hasattr(model, 'peak_widths_freq') and len(model.peak_widths_freq) > 0 else None
+            if detected_peak_freqs is not None and len(detected_peak_freqs) < len(baseline.peak_freqs):
+                baseline.peak_freqs = detected_peak_freqs
+                if detected_peak_heights is not None:
+                    baseline.peak_heights = detected_peak_heights
+                if detected_peak_widths is not None:
+                    baseline.peak_widths_freq = detected_peak_widths
+                print(f"♻️ SMS: 使用已检测的 {len(baseline.peak_freqs)} 个峰进行扫描")
             self.saved_data = baseline
             QApplication.processEvents()
 
@@ -1198,7 +1477,6 @@ class RionID_GUI(QWidget):
             circumference = float(self.circumference_edit.text())
             sim_scalingfactor = self.sim_scalingfactor_edit.text().strip()
             sim_scalingfactor = float(sim_scalingfactor) if sim_scalingfactor else None
-            reload_data = self.reload_data_checkbox.isChecked()
             simulation_result = self.simulation_result_edit.text()
             matched_result = self.matched_result_edit.text()
 
@@ -1220,30 +1498,16 @@ class RionID_GUI(QWidget):
             circ_max     = float(self.circ_max_edit.text() or "120")
             circ_step    = float(self.circ_step_edit.text() or "1")
 
-            # If baseline was already applied once, skip re-loading / re-baseline
+            # If baseline was already applied once, skip re-baseline
             if self.saved_data is not None and getattr(self.saved_data, '_baseline_applied', False):
-                reload_data = False
                 remove_baseline = False
 
-            # --- 1) Load experimental data and detect peaks ---
-            model = ImportData(
-                refion=refion,
-                highlight_ions=highlight_ions,
-                remove_baseline=remove_baseline or None,
-                psd_baseline_removed_l=psd_baseline_removed_l or None,
-                psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
-                alphap=alphap,
-                filename=datafile,
-                reload_data=reload_data,
-                circumference=circumference,
-                peak_threshold_pct=peak_threshold_pct,
-                min_distance=min_distance,
-                matching_freq_min=matching_freq_min,
-                matching_freq_max=matching_freq_max
-            )
-            if not hasattr(model, "peak_freqs") or len(model.peak_freqs) == 0:
-                raise RuntimeError("Could not detect any experimental peaks.")
-            self.visualization_signal.emit(model)
+            # --- 1) 使用已载入的数据 ---
+            model = self._get_model(emit_signal=False)
+            # 记住已检测的峰（Find Peaks 后的结果），后面 baseline 会覆盖 peak_freqs
+            detected_peak_freqs = model.peak_freqs.copy() if hasattr(model, 'peak_freqs') else None
+            detected_peak_heights = model.peak_heights.copy() if hasattr(model, 'peak_heights') and len(model.peak_heights) > 0 else None
+            detected_peak_widths = model.peak_widths_freq.copy() if hasattr(model, 'peak_widths_freq') and len(model.peak_widths_freq) > 0 else None
             print(f"Detected {len(model.peak_freqs)} experimental peaks.")
 
             # --- Build baseline (load particles & moqs) ---
@@ -1262,11 +1526,11 @@ class RionID_GUI(QWidget):
                 mode="Bρ",
                 sim_scalingfactor=sim_scalingfactor,
                 value="5.0",
-                reload_data=reload_data,
+                reload_data=True,
                 peak_threshold_pct=peak_threshold_pct,
                 min_distance=min_distance,
                 output_results=False,
-                saved_data=None,
+                saved_data=self.saved_data,
                 matching_freq_min=matching_freq_min,
                 matching_freq_max=matching_freq_max,
                 simulation_result=simulation_result
@@ -1274,6 +1538,14 @@ class RionID_GUI(QWidget):
             baseline = import_controller(**vars(baseline_args))
             if baseline is None:
                 raise RuntimeError("Failed to build baseline ImportData for scanning.")
+            # 恢复已检测的峰到 baseline 上，供 scan_match_brho 使用
+            if detected_peak_freqs is not None:
+                baseline.peak_freqs = detected_peak_freqs
+                if detected_peak_heights is not None:
+                    baseline.peak_heights = detected_peak_heights
+                if detected_peak_widths is not None:
+                    baseline.peak_widths_freq = detected_peak_widths
+                print(f"♻️ IMS: 使用已检测的 {len(baseline.peak_freqs)} 个峰进行扫描")
             self.saved_data = baseline
             QApplication.processEvents()
 

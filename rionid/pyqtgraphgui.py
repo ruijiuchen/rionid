@@ -375,15 +375,20 @@ class CreatePyGUI(QMainWindow):
                         self.annotation_ref_highlight_items.append((line, text))
 
             if line is not None:
-                self.legend.addItem(line, f'Harmonic = {float(harmonic)} ; Bρ = {data.brho:.6f} [Tm].')
-                self.legend.addItem(
-                    line,
-                    f"reference frequency = {data.ref_frequency:.2f} Hz ; "
-                    f"αₚ = {data.alphap:.4f} ; "
-                    f"γₜ = {data.gammat:.4f} ; "
-                    f"χ² = {data.chi2:.1f} ; "
-                    f"match_count = {int(data.match_count)}"
-                )
+                # --- mode-dependent legend ---
+                mode = getattr(data, 'mode', 'Frequency')
+                if mode == 'Bρ':
+                    mode_info = (f'Bρ = {data.brho:.6f} Tm  |  '
+                                 f'C = {data.ring.circumference:.6f} m')
+                else:
+                    mode_info = (f'f_ref = {data.ref_frequency:.2f} Hz  |  '
+                                 f'αₚ = {data.alphap:.4f}  |  '
+                                 f'γₜ = {data.gammat:.4f}')
+                self.legend.addItem(line,
+                    f'Harmonic = {float(harmonic)}  |  '
+                    f'{mode_info}  |  '
+                    f'χ² = {data.chi2:.2e}  |  '
+                    f'matches = {int(data.match_count)}')
 
     def get_z_exp_at_freq(self, freq, freq_range):
         if len(self.x_exp) == 0 or len(self.z_exp) == 0:

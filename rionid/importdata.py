@@ -23,7 +23,7 @@ class ImportData(object):
     '''
     Model (MVC)
     '''
-    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l, psd_baseline_removed_ratio, alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None, ref_harmonic=None):
+    def __init__(self, refion, highlight_ions, remove_baseline, psd_baseline_removed_l, psd_baseline_removed_ratio, alphap, filename = None, reload_data = None, circumference = None, peak_threshold_pct=None,min_distance=None,matching_freq_min=None,matching_freq_max=None, ref_harmonic=None, hist_freq_min=None, hist_freq_max=None, hist_bins=None, skip_peak_detection=False):
         self.simulated_data_dict = {}  # Make sure this is initialized
         # Argparser arguments
         self.harmonics=[]
@@ -39,10 +39,15 @@ class ImportData(object):
         self.ring = Ring('ESR', circumference)
         self.ref_aa, self.ref_element, self.ref_charge = self._parse_ion_name(refion)
         self.experimental_data = None
-        self.brho = 0 
+        self.brho = 0
         self.peak_threshold_pct = float(peak_threshold_pct)
         self.peak_freqs = []
         self.peak_widths_freq = []
+        # 柱状图参数（供 load_peaks_summary 使用）
+        self.hist_freq_min = hist_freq_min
+        self.hist_freq_max = hist_freq_max
+        self.hist_bins = hist_bins
+        self.skip_peak_detection = skip_peak_detection
         self.peak_heights = []
         self.gammats = []
         self.yield_data=[]
@@ -67,16 +72,23 @@ class ImportData(object):
         self.ref_frequency=0
         self._baseline_applied = False
         # Get the experimental data
+        print("chenrj ... ImportData 1")
         if filename is not None:
-            if reload_data:
+            if filename.lower().endswith('.txt'):
+                # 峰汇总文件：没有有意义的缓存，始终直接读取
+                print("chenrj ... ImportData 1a (.txt)")
+                self._get_experimental_data(filename)
+            elif reload_data:
+                print("chenrj ... ImportData 1a")
                 self._get_experimental_data(filename)
                 self._save_experimental_data()
             else:
+                print("chenrj ... ImportData 1b")
                 self._load_experimental_data()
         else:
             print("No experimental data file provided. Using default or simulated data.")
             self.experimental_data = None  # Set empty or simulated data here
-        
+        print("chenrj ... ImportData 2")
     def _parse_ion_name(self, refion):
         """
         Parse an ion name to extract mass number, element symbol, and charge.
@@ -120,6 +132,15 @@ class ImportData(object):
                 for row in sdata:
                     sim_items.append((float(row[0]), row[2], harmonic, float(row[1])))  # 添加 harmonic_name 和产额
         sim_freqs = np.array([freq for freq, _, _, _ in sim_items])
+        # ── 调试：输出频率范围和阈值 ──
+        if len(self.peak_freqs) > 0 and len(sim_freqs) > 0:
+            print(f"\n🔍 匹配调试:")
+            print(f"   实验峰频率范围: {self.peak_freqs.min()/1e6:.4f} – {self.peak_freqs.max()/1e6:.4f} MHz")
+            print(f"   模拟谱频率范围: {sim_freqs.min()/1e6:.4f} – {sim_freqs.max()/1e6:.4f} MHz")
+            print(f"   匹配阈值: {match_threshold} Hz = {match_threshold/1e6:.6f} MHz")
+            print(f"   实验峰数: {len(self.peak_freqs)}, 模拟峰数: {len(sim_freqs)}")
+            print(f"   前5个实验峰 (MHz): {[f/1e6 for f in self.peak_freqs[:5]]}")
+            print(f"   前5个模拟峰 (MHz): {[f/1e6 for f in sim_freqs[:5]]}")
         # Initialize accumulators
         chi2 = 0.0
         match_count = 0
@@ -464,6 +485,7 @@ class ImportData(object):
         return f"{base}_cache.npz"
     
     def _get_experimental_data(self, filename):
+        print("chenrj ... _get_experimental_data 1")
         base, file_extension = os.path.splitext(filename)
         if file_extension.lower() == '.csv':
             self.experimental_data = read_psdata(filename, dbm = False)
@@ -486,6 +508,8 @@ class ImportData(object):
 
         # ── 峰汇总文件 (.txt)：不包含完整频谱，直接解析预检测的峰列表 ──
         if file_extension.lower() == '.txt':
+            print("chenrj ... _get_experimental_data 2")
+            print("chenrj ... = filename = ",filename)
             self.load_peaks_summary(filename)
             # experimental_data 保留为 None（无完整频谱），detect_peaks_and_widths 会跳过
             return  # 无需走后续的基线去除 / 寻峰流程
@@ -533,8 +557,9 @@ class ImportData(object):
                 sys.exit(1)   # 退出码 1 表示异常退出
 
     
-        self.detect_peaks_and_widths()
-        
+        if not self.skip_peak_detection:
+            self.detect_peaks_and_widths()
+
     def detect_peaks_and_widths(self):
         if self.experimental_data is None:
             return
@@ -609,24 +634,21 @@ class ImportData(object):
     def load_peaks_summary(self, filepath):
         """
         载入 all_peaks_summary 格式的峰汇总文件（.txt），
-        直接读取预检测的峰频率、峰高和峰宽到 self.peak_freqs / peak_heights / peak_widths_freq。
+        读取第 3~5 列（频率/峰高/FWHM）到 self.peak_freqs / peak_heights / peak_widths_freq，
+        同时将频率分布转换为柱状图存入 self.experimental_data = (bin_centers, counts)。
 
         文件格式（制表符分隔）:
             总序号\t峰序号\t频率[MHz]\t峰高\tFWHM[MHz]\tstart[s]\tend[s]\t...
         第 3 列 = 频率 (MHz)，第 4 列 = 峰高，第 5 列 = FWHM (MHz)
 
-        Parameters
-        ----------
-        filepath : str
-            峰汇总 .txt 文件路径
+        柱状图参数（freq_min / freq_max / bins）通过 self 上的同名属性传入，
+        可由 GUI 对话框预先设置。
         """
-        print("chenrj ...")
         freq_list, amp_list, fwhm_list = [], [], []
 
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                # 跳过空行、表头行、分隔线
                 if not line or line.startswith('总序号') or line.startswith('---'):
                     continue
                 parts = line.split()
@@ -634,19 +656,45 @@ class ImportData(object):
                     continue
                 try:
                     freq_list.append(float(parts[2]) * 1e6)   # MHz → Hz
-                    amp_list.append(float(parts[3]))           # 峰高（原始幅度）
+                    amp_list.append(float(parts[3]))           # 峰高
                     fwhm_list.append(float(parts[4]) * 1e6)    # FWHM MHz → Hz
                 except (ValueError, IndexError):
                     continue
 
-        self.peak_freqs       = np.array(freq_list)
+        raw_freqs = np.array(freq_list)
+        self.peak_freqs       = raw_freqs
         self.peak_heights     = np.array(amp_list)
         self.peak_widths_freq = np.array(fwhm_list)
 
-        print(f"✅ 已从 {filepath} 载入 {len(self.peak_freqs)} 个峰 "
-              f"(频率范围 {self.peak_freqs.min()/1e6:.3f} – {self.peak_freqs.max()/1e6:.3f} MHz)")
+        # 从 self 读取柱状图参数（可由 GUI 对话框设置）
+        freq_min = getattr(self, 'hist_freq_min', None)
+        freq_max = getattr(self, 'hist_freq_max', None)
+        bins = self.hist_bins if self.hist_bins is not None else 200
 
-    def _get_experimental_data(self, filename):
+        # 如果设置了范围，过滤频率数据
+        if freq_min is not None or freq_max is not None:
+            mask = np.ones_like(raw_freqs, dtype=bool)
+            if freq_min is not None:
+                mask &= (raw_freqs >= freq_min)
+            if freq_max is not None:
+                mask &= (raw_freqs <= freq_max)
+            filtered = raw_freqs[mask]
+            print(f"  频率范围过滤: {len(raw_freqs)} → {len(filtered)} 个峰 "
+                  f"({freq_min/1e6 if freq_min else 'min':.3f} – {freq_max/1e6 if freq_max else 'max':.3f} MHz)")
+            raw_freqs = filtered
+
+        # 构建柱状图：counts per bin
+        hist_range = (freq_min, freq_max) if freq_min is not None or freq_max is not None else None
+        counts, bin_edges = np.histogram(raw_freqs, bins=bins, range=hist_range)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        # 存入 experimental_data，格式 (频率, 幅度) 与原有频谱数据兼容
+        self.experimental_data = (bin_centers, counts.astype(float))
+
+        print(f"✅ 已从 {filepath} 载入 {len(raw_freqs)} 个峰 → 柱状图 {bins} bins "
+              f"(频率范围 {bin_centers.min()/1e6:.3f} – {bin_centers.max()/1e6:.3f} MHz)")
+
+    def _save_experimental_data(self, data=None):
         if data is not None:
             frequency, amplitude_avg = data
             np.savez_compressed(self.cache_file, frequency=frequency, amplitude_avg=amplitude_avg)
@@ -751,6 +799,7 @@ class ImportData(object):
         
     def _simulated_data(self, brho = None, harmonics = None, particles = False,mode = None, sim_scalingfactor = None, nions = None):
        self.harmonics = harmonics
+       self.mode = mode  # 保存模式供 GUI 显示
        for harmonic in harmonics:
            ref_moq = self.moq[self.ref_ion]
            if mode == 'Bρ':

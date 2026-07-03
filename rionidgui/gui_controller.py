@@ -6,8 +6,9 @@ import time
 import numpy as np
 from PyQt5.QtWidgets import QMessageBox
 
-def import_controller(datafile=None, filep=None, remove_baseline = None, psd_baseline_removed_l = None,psd_baseline_removed_ratio = None, alphap=None, refion=None, highlight_ions=None, harmonics = None, nions = None, amplitude=None, circumference = None, mode=None, sim_scalingfactor=None, value=None, reload_data=None,peak_threshold_pct = None,min_distance=None,output_results=None,saved_data = None,matching_freq_min=None,matching_freq_max=None,simulation_result=None, ref_harmonic=None):
+def import_controller(datafile=None, filep=None, remove_baseline = None, psd_baseline_removed_l = None,psd_baseline_removed_ratio = None, alphap=None, refion=None, highlight_ions=None, harmonics = None, nions = None, amplitude=None, circumference = None, mode=None, sim_scalingfactor=None, value=None, reload_data=None,peak_threshold_pct = None,min_distance=None,output_results=None,saved_data = None,matching_freq_min=None,matching_freq_max=None,simulation_result=None, ref_harmonic=None, hist_freq_min=None, hist_freq_max=None, hist_bins=None):
     try:
+        print("chenrj ...import_controller 1")
         start_time = time.time()  # Record start time for each test_alphap iteration
         # initializations
         if float(alphap) > 1: alphap = 1/float(alphap)**2 # handling alphap and gammat
@@ -17,9 +18,11 @@ def import_controller(datafile=None, filep=None, remove_baseline = None, psd_bas
         elif mode == 'Kinetic Energy': ke = float(value)
         elif mode == 'Gamma': gam = float(value)
         # Calculations | ImportData library
-        mydata = ImportData(refion, highlight_ions, remove_baseline, float(psd_baseline_removed_l),float(psd_baseline_removed_ratio), float(alphap), filename = datafile, reload_data = reload_data, circumference = circumference,peak_threshold_pct=peak_threshold_pct,min_distance=min_distance,matching_freq_min=matching_freq_min,matching_freq_max=matching_freq_max, ref_harmonic=ref_harmonic)
+        print("chenrj ...import_controller 1a")
+        mydata = ImportData(refion, highlight_ions, remove_baseline, float(psd_baseline_removed_l),float(psd_baseline_removed_ratio), float(alphap), filename = datafile, reload_data = reload_data, circumference = circumference,peak_threshold_pct=peak_threshold_pct,min_distance=min_distance,matching_freq_min=matching_freq_min,matching_freq_max=matching_freq_max, ref_harmonic=ref_harmonic, hist_freq_min=hist_freq_min, hist_freq_max=hist_freq_max, hist_bins=hist_bins)
         end_time1 = time.time()  # Record end time after each iteration
         elapsed_time1 = end_time1 - start_time  # Calculate elapsed time for this iteration
+        print("chenrj ...import_controller 2")
         if reload_data: 
             mydata._set_particles_to_simulate_from_file(filep,verbose=output_results)
             mydata._calculate_moqs()
@@ -33,6 +36,7 @@ def import_controller(datafile=None, filep=None, remove_baseline = None, psd_bas
             mydata.peak_freqs = saved_data.peak_freqs
             mydata.peak_widths_freq = saved_data.peak_widths_freq
             mydata.peak_heights = saved_data.peak_heights
+        print("chenrj ...import_controller 3")
         mydata._calculate_srrf(fref = fref, brho = brho, ke = ke, gam = gam, correct = False)
         harmonics = [float(h) for h in harmonics.split()]
         mydata._simulated_data(brho = brho, harmonics = harmonics, mode = mode, sim_scalingfactor = sim_scalingfactor, nions = nions) # -> simulated frecs
