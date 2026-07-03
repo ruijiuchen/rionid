@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (QApplication,QWidget, QLabel, QLineEdit, QPushButton,
                              QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox,
                              QFileDialog, QMessageBox, QGroupBox, QToolButton,
-                             QDialog, QDoubleSpinBox, QDialogButtonBox, QSpinBox)
+                             QDialog, QDoubleSpinBox, QDialogButtonBox, QSpinBox,
+                             QProgressBar)
 from PyQt5.QtCore import pyqtSignal, QThread, Qt
 from PyQt5.QtGui import QFont
 import toml
@@ -466,9 +467,14 @@ class RionID_GUI(QWidget):
         hbox_thresh_profile.addWidget(self.thresh_profile_edit)
         self.vbox.addLayout(hbox_thresh_profile)
 
+        self.thresh_clear_button = QPushButton('Clear')
+        self.thresh_clear_button.setFont(common_font)
+        self.thresh_clear_button.clicked.connect(self._on_thresh_clear)
+
         hbox_thresh_buttons = QHBoxLayout()
         hbox_thresh_buttons.addWidget(self.thresh_browse_button)
         hbox_thresh_buttons.addWidget(self.thresh_toggle_button)
+        hbox_thresh_buttons.addWidget(self.thresh_clear_button)
         self.vbox.addLayout(hbox_thresh_buttons)
 
         # ──── Find Peaks button ────
@@ -750,6 +756,13 @@ class RionID_GUI(QWidget):
         """)
         self.SMS_pid_button.clicked.connect(self.SMS_pid_script)
         SMS_layout.addWidget(self.SMS_pid_button)
+
+        # SMS 进度条
+        self.sms_progress = QProgressBar()
+        self.sms_progress.setFont(common_font)
+        self.sms_progress.setVisible(False)
+        SMS_layout.addWidget(self.sms_progress)
+
         SMS_pid_group.setLayout(SMS_layout)
         self.vbox.addWidget(SMS_pid_group)
 
@@ -827,6 +840,13 @@ class RionID_GUI(QWidget):
         """)
         self.IMS_pid_button.clicked.connect(self.IMS_pid_script)
         IMS_layout.addWidget(self.IMS_pid_button)
+
+        # IMS 进度条
+        self.ims_progress = QProgressBar()
+        self.ims_progress.setFont(common_font)
+        self.ims_progress.setVisible(False)
+        IMS_layout.addWidget(self.ims_progress)
+
         IMS_pid_group.setLayout(IMS_layout)
         self.vbox.addWidget(IMS_pid_group)
 
@@ -965,6 +985,17 @@ class RionID_GUI(QWidget):
                 filename = f"{filename}.csv"
             self.thresh_profile_edit.setText(filename)
 
+    def _on_thresh_clear(self):
+        """Clear the threshold profile data."""
+        data = self.saved_data or self.visualization_widget.current_data
+        if data is not None:
+            data.threshold_profile_freqs = None
+            data.threshold_profile_vals = None
+            data.threshold_profile_path = None
+        self.visualization_widget.clear_threshold_profile()
+        self.thresh_profile_edit.clear()
+        print("✅ Threshold profile cleared.")
+
     def _sync_thresh_profile_path(self, data):
         """Sync the threshold profile path display with the given data object."""
         if data is not None:
@@ -984,8 +1015,6 @@ class RionID_GUI(QWidget):
             psd_baseline_removed_l = float(self.psd_baseline_removed_l_edit.text())
             psd_baseline_removed_ratio = float(self.psd_baseline_removed_ratio_edit.text())
             alphap = float(self.alphap_edit.text())
-            peak_threshold_pct = self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05
-            min_distance = float(self.min_distance_edit.text())
             harmonics = self.harmonics_edit.text()
             refion = self.refion_edit.text()
             highlight_ions = self.highlight_ions_edit.text()
@@ -1007,64 +1036,75 @@ class RionID_GUI(QWidget):
             except ValueError:
                 raise ValueError("Please enter a valid number for matching_freq_min_edit")
 
-            # ── 使用已载入的数据（必须先点击「载入数据」）──
-            data = self._get_model(emit_signal=False)
+            # 使用已载入的数据
+            model = self._get_model(emit_signal=False)
 
-            args = argparse.Namespace(
+            # --- Build baseline (load particles & moqs, run full simulation) ---
+            baseline_args = argparse.Namespace(
                 datafile=datafile,
-                filep=filep or None,
-                remove_baseline=remove_baseline or None,
-                psd_baseline_removed_l=psd_baseline_removed_l or None,
-                psd_baseline_removed_ratio=psd_baseline_removed_ratio or None,
-                alphap=alphap or None,
-                harmonics=harmonics or None,
-                refion=refion or None,
-                highlight_ions=highlight_ions or None,
-                nions=nions or None,
-                circumference=circumference or None,
-                mode=mode or None,
-                sim_scalingfactor=sim_scalingfactor or None,
-                value=value or None,
+                filep=filep,
+                remove_baseline=remove_baseline,
+                psd_baseline_removed_l=psd_baseline_removed_l,
+                psd_baseline_removed_ratio=psd_baseline_removed_ratio,
+                alphap=alphap,
+                harmonics=harmonics,
+                refion=refion,
+                highlight_ions=highlight_ions,
+                nions=nions,
+                circumference=circumference,
+                mode=mode,
+                sim_scalingfactor=sim_scalingfactor,
+                value=value,
                 reload_data=True,
-                peak_threshold_pct=peak_threshold_pct,
-                min_distance=min_distance,
+                peak_threshold_pct=self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05,
+                min_distance=float(self.min_distance_edit.text()),
                 output_results=True,
                 saved_data=self.saved_data,
                 matching_freq_min=matching_freq_min,
                 matching_freq_max=matching_freq_max,
                 simulation_result=simulation_result,
                 ref_harmonic=ref_harmonic,
+                skip_peak_detection=True,
             )
-            self.save_parameters()
-            data = import_controller(**vars(args))
-            if data is not None:
-                # 使用已检测到的峰（经过 Find Peaks 过滤），而不是文件中的全部原始数据
-                if (self.saved_data is not None
-                        and hasattr(self.saved_data, 'peak_freqs')
-                        and len(self.saved_data.peak_freqs) > 0
-                        and len(self.saved_data.peak_freqs) < len(data.peak_freqs)):
-                    data.peak_freqs = self.saved_data.peak_freqs.copy()
-                    h = self.saved_data
-                    data.peak_heights = (h.peak_heights.copy() if hasattr(h, 'peak_heights') and len(h.peak_heights) > 0
-                                         else np.ones_like(h.peak_freqs))
-                    data.peak_widths_freq = (h.peak_widths_freq.copy() if hasattr(h, 'peak_widths_freq') and len(h.peak_widths_freq) > 0
-                                             else np.full_like(h.peak_freqs, np.nan))
-                    print(f"♻️ 使用已检测的 {len(data.peak_freqs)} 个峰进行匹配")
+            baseline = import_controller(**vars(baseline_args))
+            if baseline is None:
+                raise RuntimeError("Failed to build baseline for Run.")
 
-                if getattr(data, 'experimental_data', None) is not None:
-                    best_chi2, best_match_count, best_match_ions = data.compute_matches(
-                        threshold, matching_freq_min, matching_freq_max,
-                    )
-                    data.save_matched_result(matched_result)
-                    print(f"\n📊 匹配结果: χ² = {best_chi2:.4e}, 匹配数 = {best_match_count}")
-                    print(f"   匹配离子: {best_match_ions}")
-                    # 在 GUI 标题栏显示最佳匹配信息
-                    self.setWindowTitle(f"RionID+  χ²={best_chi2:.2e}  N={best_match_count}  {best_match_ions[:3] if best_match_ions else ''}")
-                # 仅传递匹配结果，不改变已载入的数据和柱状图
-                self.overlay_sim_signal.emit(data)
-                self._sync_thresh_profile_path(data)
-            else:
-                print("⚠️ import_controller returned None, skipping visualization update.")
+            # 使用已检测的峰
+            if hasattr(model, 'peak_freqs') and len(model.peak_freqs) > 0:
+                baseline.peak_freqs = model.peak_freqs.copy()
+                if hasattr(model, 'peak_heights') and len(model.peak_heights) > 0:
+                    baseline.peak_heights = model.peak_heights.copy()
+                if hasattr(model, 'peak_widths_freq') and len(model.peak_widths_freq) > 0:
+                    baseline.peak_widths_freq = model.peak_widths_freq.copy()
+                print(f"♻️ Run: 使用已检测的 {len(baseline.peak_freqs)} 个峰进行匹配")
+
+            # 直接调用 compute_matches（与 IMS 相同的匹配方法）
+            harmonics_list = [float(h) for h in harmonics.split()]
+            chi2, match_count, highlights = baseline.compute_matches(
+                match_threshold=threshold,
+                match_frequency_min=matching_freq_min,
+                match_frequency_max=matching_freq_max,
+                verbose=True,
+            )
+            baseline.save_matched_result(matched_result)
+
+            # 输出各谐波的匹配数
+            if hasattr(baseline, 'matched_sim_items') and baseline.matched_sim_items:
+                per_h = {}
+                for item in baseline.matched_sim_items:
+                    h = int(float(item[2]))
+                    per_h[h] = per_h.get(h, 0) + 1
+                parts = '  '.join(f'h{k}={v}' for k, v in sorted(per_h.items()))
+                print(f"\n📊 匹配结果: χ² = {chi2:.4e}, 总匹配数 = {match_count}")
+                print(f"   各谐波匹配数: {parts}")
+                print(f"   匹配离子: {highlights}")
+                self.setWindowTitle(f"RionID+  χ²={chi2:.2e}  N={match_count}  {highlights[:3] if highlights else ''}")
+
+            self.overlay_sim_signal.emit(baseline)
+            self._sync_thresh_profile_path(baseline)
+            self.save_parameters()
+
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'An error occurred: {str(e)}')
             log.error("Processing failed", exc_info=True)
@@ -1143,30 +1183,39 @@ class RionID_GUI(QWidget):
         hist_freq_max = None
         hist_bins = None
         if datafile.lower().endswith('.txt'):
-            raw_list = []
-            with open(datafile, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith('总序号') or line.startswith('---'):
-                        continue
-                    parts = line.split()
-                    if len(parts) < 3:
-                        continue
-                    try:
-                        raw_list.append(float(parts[2]) * 1e6)
-                    except (ValueError, IndexError):
-                        continue
-            if raw_list:
-                raw_freqs = np.array(raw_list)
-                dialog = HistogramConfigDialog(raw_freqs, self)
-                if dialog.exec_() == QDialog.Accepted:
-                    hist_freq_min, hist_freq_max, hist_bins = dialog.get_params()
-                    self._hist_freq_min = hist_freq_min
-                    self._hist_freq_max = hist_freq_max
-                    self._hist_bins = hist_bins
-                else:
-                    print("⚠️ 用户取消了柱状图配置")
-                    return
+            # 检查是否已有保存的参数（从 parameters_cache.toml 载入）
+            if (getattr(self, '_hist_freq_min', None) is not None
+                    and getattr(self, '_hist_freq_max', None) is not None
+                    and getattr(self, '_hist_bins', None) is not None):
+                hist_freq_min = self._hist_freq_min
+                hist_freq_max = self._hist_freq_max
+                hist_bins = self._hist_bins
+                print(f"♻️ 复用已保存的柱状图参数: {hist_freq_min/1e6:.4f}–{hist_freq_max/1e6:.4f} MHz, {hist_bins} bins")
+            else:
+                raw_list = []
+                with open(datafile, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith('总序号') or line.startswith('---'):
+                            continue
+                        parts = line.split()
+                        if len(parts) < 3:
+                            continue
+                        try:
+                            raw_list.append(float(parts[2]) * 1e6)
+                        except (ValueError, IndexError):
+                            continue
+                if raw_list:
+                    raw_freqs = np.array(raw_list)
+                    dialog = HistogramConfigDialog(raw_freqs, self)
+                    if dialog.exec_() == QDialog.Accepted:
+                        hist_freq_min, hist_freq_max, hist_bins = dialog.get_params()
+                        self._hist_freq_min = hist_freq_min
+                        self._hist_freq_max = hist_freq_max
+                        self._hist_bins = hist_bins
+                    else:
+                        print("⚠️ 用户取消了柱状图配置")
+                        return
 
         # 构造 ImportData（始终重新读取文件）
         refion = self.refion_edit.text()
@@ -1197,8 +1246,8 @@ class RionID_GUI(QWidget):
             hist_bins=hist_bins,
             skip_peak_detection=True
         )
-        if not hasattr(model, 'peak_freqs') or len(model.peak_freqs) == 0:
-            raise RuntimeError("无法检测到实验峰，请检查数据文件。")
+        if model.experimental_data is None or (hasattr(model.experimental_data, '__len__') and len(model.experimental_data) != 2):
+            raise RuntimeError("无法载入数据，请检查数据文件。")
         self.saved_data = model
         self.visualization_signal.emit(model)
         self._sync_thresh_profile_path(model)
@@ -1219,8 +1268,8 @@ class RionID_GUI(QWidget):
     def _get_model(self, emit_signal=True):
         """返回 self.saved_data，如果未载入数据则报错。"""
         if (self.saved_data is None
-                or not hasattr(self.saved_data, 'peak_freqs')
-                or len(self.saved_data.peak_freqs) == 0):
+                or not hasattr(self.saved_data, 'experimental_data')
+                or self.saved_data.experimental_data is None):
             raise RuntimeError("尚未载入实验数据，请先点击「📂 载入数据」按钮。")
         if emit_signal:
             self.visualization_signal.emit(self.saved_data)
@@ -1366,6 +1415,14 @@ class RionID_GUI(QWidget):
             orig_alpha_style = self.alphap_edit.styleSheet()
             results = []
 
+            # 进度条设置
+            n_fref = len(exp_peaks_hz_filtering)
+            n_alphap = len(np.arange(alphap_min, alphap_max + 1e-12, alphap_step))
+            sms_total = n_fref * n_alphap
+            sms_step = 0
+            self.sms_progress.setVisible(True)
+            self.sms_progress.setValue(0)
+
             for f_ref in exp_peaks_hz_filtering:
                 QApplication.processEvents()
                 if self._stop_SMS_pid:
@@ -1400,6 +1457,12 @@ class RionID_GUI(QWidget):
                         ref_harmonic=ref_harmonic,
                     )
                     results.append((f_ref, test_alphap, chi2, match_count, highlights))
+
+                    # 更新进度条
+                    sms_step += 1
+                    if sms_total > 0:
+                        self.sms_progress.setValue(int(sms_step / sms_total * 100))
+                    QApplication.processEvents()
 
                 # After inner loop: find best for this f_ref
                 sorted_results = sorted(results, key=lambda x: (-x[3], x[2]))
@@ -1447,6 +1510,7 @@ class RionID_GUI(QWidget):
                 self.alphap_edit.setStyleSheet(orig_alpha_style)
                 
                 # after outer loop, restore value style
+            self.sms_progress.setVisible(False)
             self.value_edit.setStyleSheet(orig_value_style)
             self.save_parameters()  # Save parameters before running the script
 
@@ -1557,18 +1621,26 @@ class RionID_GUI(QWidget):
             self.mode_combo.setCurrentText("Bρ")
             QApplication.processEvents()
 
-            for test_brho in np.arange(brho_min, brho_max + 1e-12, brho_step):
+            # 计算总步数配置进度条
+            brho_vals = np.arange(brho_min, brho_max + 1e-12, brho_step)
+            circ_vals = np.arange(circ_min, circ_max + 1e-12, circ_step)
+            total_steps = len(brho_vals) * len(circ_vals)
+            step = 0
+            self.ims_progress.setVisible(True)
+            self.ims_progress.setValue(0)
+
+            for test_brho in brho_vals:
                 QApplication.processEvents()
                 if self._stop_IMS_pid:
                     print("IMS scan was stopped by user click.")
                     break
 
-                # Update UI to show current brho in the Mode: Br value field
+                # Update UI to show current brho
                 self.value_edit.setStyleSheet("background-color: #b0fff8;")
-                self.value_edit.setText(f"{test_brho:.4f}")
+                self.value_edit.setText(f"{test_brho:.6f}")
                 QApplication.processEvents()
 
-                for test_circ in np.arange(circ_min, circ_max + 1e-12, circ_step):
+                for test_circ in circ_vals:
                     if self._stop_IMS_pid:
                         print("IMS scan was stopped by user click.")
                         break
@@ -1580,8 +1652,17 @@ class RionID_GUI(QWidget):
                         match_threshold=threshold,
                         match_frequency_min=matching_freq_min,
                         match_frequency_max=matching_freq_max,
+                        verbose=False,
                     )
                     results.append((test_brho, test_circ, chi2, match_count, highlights))
+
+                    # 更新进度条
+                    step += 1
+                    if total_steps > 0:
+                        self.ims_progress.setValue(int(step / total_steps * 100))
+                    QApplication.processEvents()
+
+            self.ims_progress.setVisible(False)
 
             # --- Find best result ---
             if not results:

@@ -2,7 +2,7 @@ import sys
 import os
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLabel, QDesktopWidget, QSpinBox, QLineEdit
+from PyQt5.QtWidgets import QMainWindow, QApplication, QVBoxLayout, QWidget, QPushButton, QHBoxLayout, QLabel, QDesktopWidget, QSpinBox, QLineEdit, QProgressBar
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import QLoggingCategory, Qt
 from PyQt5.QtCore import QEvent, pyqtSignal
@@ -32,6 +32,7 @@ class CreatePyGUI(QMainWindow):
     # signal to let the controller know the user clicked on the plot
     plotClicked = pyqtSignal()
     thresholdClickModeChanged = pyqtSignal(bool)
+    progressUpdate = pyqtSignal(str, int)  # (message, percent 0-100)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -221,12 +222,13 @@ class CreatePyGUI(QMainWindow):
         self.plot_simulated_data(data)
 
     def plot_experimental_data(self, data):
-        print("plotting experimental data...")
+        self.progressUpdate.emit("绘制实验数据...", 0)
         if data.experimental_data is None:  # Check if experimental data is available
             print("No experimental data available, skipping experimental data plotting.")
+            self.progressUpdate.emit("实验数据不可用", 100)
             return  # Skip plotting experimental data
-            
-        # Plot experimental data            
+
+        # Plot experimental data
         self.experimental_data = data.experimental_data
         
         self.remove_baseline = data.remove_baseline
@@ -296,18 +298,30 @@ class CreatePyGUI(QMainWindow):
             symbolSize=12           # size in pixels
         )
         self.legend.addItem(self.red_triangles, 'Peaks')
-        
+        self.progressUpdate.emit("实验数据绘制完成", 100)
+
     def to_superscript(self, s):
         supers = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹'}
         return ''.join(supers.get(c, c) for c in s)
         
     def plot_simulated_data(self, data):
         print("plotting simulated data...")
-        print("data.matching_freq_min = ",data.matching_freq_min)
-        print("data.matching_freq_max = ",data.matching_freq_max)
+        self.progressUpdate.emit("绘制模拟谱...", 0)
         self.simulated_data = data.simulated_data_dict
         refion = data.ref_ion
         highlight_ions = data.highlight_ions # Get the list of ions to highlight in green
+
+        # 计算总条目数以更新进度
+        total_entries = sum(len(sdata) for sdata in self.simulated_data.values())
+        entry_count = 0
+
+        # pre-compute per-harmonic match counts
+        per_harmonic_counts = {}
+        if hasattr(data, 'matched_sim_items') and data.matched_sim_items:
+            for item in data.matched_sim_items:
+                h = int(float(item[2]))
+                per_harmonic_counts[h] = per_harmonic_counts.get(h, 0) + 1
+
         for i, (harmonic, sdata) in enumerate(self.simulated_data.items()):
             color = pg.intColor(i, hues=len(self.simulated_data))
             line = None
@@ -374,8 +388,15 @@ class CreatePyGUI(QMainWindow):
                     if label == refion or (highlight_ions is not None and label in highlight_ions):
                         self.annotation_ref_highlight_items.append((line, text))
 
+                    # 更新绘图进度
+                    entry_count += 1
+                    if total_entries > 0 and entry_count % max(1, total_entries // 20) == 0:
+                        self.progressUpdate.emit(f"绘制模拟谱 ({entry_count}/{total_entries})...",
+                                                 int(entry_count / total_entries * 100))
+                        QApplication.processEvents()
+
             if line is not None:
-                # --- mode-dependent legend ---
+                h_val = float(harmonic)
                 mode = getattr(data, 'mode', 'Frequency')
                 if mode == 'Bρ':
                     mode_info = (f'Bρ = {data.brho:.6f} Tm  |  '
@@ -384,11 +405,25 @@ class CreatePyGUI(QMainWindow):
                     mode_info = (f'f_ref = {data.ref_frequency:.2f} Hz  |  '
                                  f'αₚ = {data.alphap:.4f}  |  '
                                  f'γₜ = {data.gammat:.4f}')
+                h_count = per_harmonic_counts.get(int(h_val), 0)
                 self.legend.addItem(line,
-                    f'Harmonic = {float(harmonic)}  |  '
-                    f'{mode_info}  |  '
-                    f'χ² = {data.chi2:.2e}  |  '
-                    f'matches = {int(data.match_count)}')
+                    f'Harmonic = {int(h_val)}  |  {mode_info}  |  matches = {h_count}')
+
+        self.progressUpdate.emit("模拟谱绘制完成", 100)
+
+        # --- summary: total chi2 + total matches ---
+        summary = '  total chi2 = %.2e  |  total matches = %d' % (data.chi2, int(data.match_count))
+        dummy = self.plot_widget.plot([], [], pen=None, symbol=None)
+        self.legend.addItem(dummy, summary)
+
+    def _on_progress(self, message, percent):
+        """更新绘图进度条"""
+        if not hasattr(self, 'plot_progress'):
+            return
+        self.plot_progress.setVisible(percent < 100)
+        if percent < 100:
+            self.plot_progress.setValue(percent)
+        QApplication.processEvents()
 
     def get_z_exp_at_freq(self, freq, freq_range):
         if len(self.x_exp) == 0 or len(self.z_exp) == 0:
@@ -532,6 +567,16 @@ class CreatePyGUI(QMainWindow):
         self.red_triangles = None
         self.baseline_line = None
         self.baseline_removed_line = None
+        self.threshold_profile_line = None
+        self.threshold_profile_points = None
+
+    def clear_threshold_profile(self):
+        """Remove threshold profile items from the plot."""
+        if hasattr(self, 'threshold_profile_line') and self.threshold_profile_line is not None:
+            self.plot_widget.removeItem(self.threshold_profile_line)
+            self.legend.removeItem(self.threshold_profile_line)
+        if hasattr(self, 'threshold_profile_points') and self.threshold_profile_points is not None:
+            self.plot_widget.removeItem(self.threshold_profile_points)
         self.threshold_profile_line = None
         self.threshold_profile_points = None
 
@@ -716,6 +761,17 @@ class CreatePyGUI(QMainWindow):
         hbox_datafile_path.addWidget(self.datafile_path_label)
         hbox_datafile_path.addWidget(self.datafile_path_display)
         main_layout.addLayout(hbox_datafile_path)
+
+        # 绘图进度条
+        self.plot_progress = QProgressBar()
+        self.plot_progress.setMaximumWidth(400)
+        self.plot_progress.setVisible(False)
+        self.plot_progress.setTextVisible(True)
+        main_layout.addWidget(self.plot_progress)
+
+        # 连接自身进度信号
+        self.progressUpdate.connect(self._on_progress)
+
 
 
 # Example Usage:

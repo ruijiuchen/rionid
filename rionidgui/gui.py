@@ -1,6 +1,6 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QComboBox, QGroupBox, QGridLayout, QDesktopWidget,  QCheckBox, QSplitter
-from PyQt5.QtCore import Qt, QLoggingCategory, QThread, pyqtSignal, QTimer, QEvent
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QComboBox, QGroupBox, QGridLayout, QDesktopWidget, QCheckBox, QSplitter
+from PyQt5.QtCore import Qt, QLoggingCategory, QThread, pyqtSignal, QEvent
 import argparse
 import os
 import logging as log
@@ -48,10 +48,10 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
         layout.addWidget(splitter)
         self.setLayout(layout)
-        
+
         # connect plot‐click signal to RionID_GUI’s stop slot
         self.visualization_widget.plotClicked.connect(self.rion_input.onPlotClicked)
-        
+
         # Connect the RionID_GUI signal to update CreatePyGUI once data is available
         self.rion_input.visualization_signal.connect(self.update_visualization)
         # Connect the “overlay one simulation” signal so we don’t clear between curves

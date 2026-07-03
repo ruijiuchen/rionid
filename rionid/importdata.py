@@ -111,7 +111,8 @@ class ImportData(object):
                         match_threshold,
                         match_frequency_min=None,
                         match_frequency_max=None,
-                        sim_items=None):
+                        sim_items=None,
+                        verbose=True):
         """
         Match the experimental peaks in self.peak_freqs against the simulated spectrum,
         but only for exp_freq in [match_frequency_min, match_frequency_max] if those are set.
@@ -133,7 +134,7 @@ class ImportData(object):
                     sim_items.append((float(row[0]), row[2], harmonic, float(row[1])))  # 添加 harmonic_name 和产额
         sim_freqs = np.array([freq for freq, _, _, _ in sim_items])
         # ── 调试：输出频率范围和阈值 ──
-        if len(self.peak_freqs) > 0 and len(sim_freqs) > 0:
+        if verbose and len(self.peak_freqs) > 0 and len(sim_freqs) > 0:
             print(f"\n🔍 匹配调试:")
             print(f"   实验峰频率范围: {self.peak_freqs.min()/1e6:.4f} – {self.peak_freqs.max()/1e6:.4f} MHz")
             print(f"   模拟谱频率范围: {sim_freqs.min()/1e6:.4f} – {sim_freqs.max()/1e6:.4f} MHz")
@@ -249,7 +250,8 @@ class ImportData(object):
             sim_items=sim_items)
 
     def scan_match_brho(self, brho, circumference, harmonics, match_threshold,
-                        match_frequency_min=None, match_frequency_max=None):
+                        match_frequency_min=None, match_frequency_max=None,
+                        verbose=True):
         """
         Lightweight scan for a single (brho, circumference) combination in Br mode.
         Reuses self.moq, self.yield_data, self.nuclei_names from a prior
@@ -301,8 +303,8 @@ class ImportData(object):
             match_threshold,
             match_frequency_min,
             match_frequency_max,
-            sim_items=sim_items)
-
+            sim_items=sim_items,
+            verbose=verbose)
 
     def save_matched_result(self, output_file='best_match_details.csv'):
         """
@@ -644,7 +646,7 @@ class ImportData(object):
         柱状图参数（freq_min / freq_max / bins）通过 self 上的同名属性传入，
         可由 GUI 对话框预先设置。
         """
-        freq_list, amp_list, fwhm_list = [], [], []
+        freq_list = []
 
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
@@ -652,19 +654,17 @@ class ImportData(object):
                 if not line or line.startswith('总序号') or line.startswith('---'):
                     continue
                 parts = line.split()
-                if len(parts) < 5:
+                if len(parts) < 3:
                     continue
                 try:
                     freq_list.append(float(parts[2]) * 1e6)   # MHz → Hz
-                    amp_list.append(float(parts[3]))           # 峰高
-                    fwhm_list.append(float(parts[4]) * 1e6)    # FWHM MHz → Hz
                 except (ValueError, IndexError):
                     continue
 
         raw_freqs = np.array(freq_list)
-        self.peak_freqs       = raw_freqs
-        self.peak_heights     = np.array(amp_list)
-        self.peak_widths_freq = np.array(fwhm_list)
+
+        # load_peaks_summary 只构建柱状图，不设置峰数据（峰由 Find Peaks 按钮检测）
+        # self.peak_freqs / peak_heights / peak_widths_freq 保持 __init__ 中的空列表
 
         # 从 self 读取柱状图参数（可由 GUI 对话框设置）
         freq_min = getattr(self, 'hist_freq_min', None)
@@ -870,7 +870,6 @@ class ImportData(object):
                         
                         # 第 h 次諧波的頻率
                         this_harmonic_freq = harmonic * f_rev
-                        print("A = ",A," elem = ",elem," q = ",q," f_rev = ",f_rev," this_harmonic_freq = ",this_harmonic_freq)
                         harmonic_freq_list.append(this_harmonic_freq)
                     
                     except Exception as e:
