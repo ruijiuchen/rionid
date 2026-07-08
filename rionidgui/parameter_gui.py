@@ -10,6 +10,7 @@ import argparse
 import logging as log
 from loguru import logger
 from rionidgui.gui_controller import import_controller
+from rionidgui.afc_calculator import AFCCalculatorDialog
 from rionid.importdata import ImportData
 import sys
 import numpy as np
@@ -154,6 +155,20 @@ class RionID_GUI(QWidget):
         self.visualization_widget = plot_widget
         self._stop_SMS_pid = False
         self._stop_IMS_pid = False
+        self._afc_time_file = ""
+        self._afc_voltage_file = ""
+        self._afc_xmin = ""
+        self._afc_xmax = ""
+        self._afc_ymin = ""
+        self._afc_ymax = ""
+        self._afc_logz = False
+        self._afc_show_proj = False
+        self._afc_offset = "5"
+        self._afc_dt = "20"
+        self._afc_split = "65"
+        self._afc_threshold_path = ""
+        self._afc_peak_dist = "3"
+        self._afc_show_thresh = True
         self.initUI()
         self.load_parameters()  # Load parameters after initializing UI
         
@@ -208,6 +223,20 @@ class RionID_GUI(QWidget):
                 self._hist_freq_min = parameters.get('hist_freq_min')
                 self._hist_freq_max = parameters.get('hist_freq_max')
                 self._hist_bins = parameters.get('hist_bins')
+                # 恢复 AFC&gtr Calculator 参数
+                self._afc_time_file = parameters.get('afc_time_file', '')
+                self._afc_voltage_file = parameters.get('afc_voltage_file', '')
+                self._afc_xmin = parameters.get('afc_xmin', '')
+                self._afc_xmax = parameters.get('afc_xmax', '')
+                self._afc_ymin = parameters.get('afc_ymin', '')
+                self._afc_ymax = parameters.get('afc_ymax', '')
+                self._afc_logz = parameters.get('afc_logz', False)
+                self._afc_show_proj = parameters.get('afc_show_proj', False)
+                self._afc_offset = parameters.get('afc_offset', '5')
+                self._afc_dt = parameters.get('afc_dt', '20')
+                self._afc_split = parameters.get('afc_split', '65')
+                self._afc_threshold_path = parameters.get('afc_threshold_path', '')
+                self._afc_peak_dist = parameters.get('afc_peak_dist', '3')
                 self.saved_data=None
                 
         except FileNotFoundError:
@@ -228,7 +257,7 @@ class RionID_GUI(QWidget):
             'matching_freq_min': self.matching_freq_min_edit.text(),
             'matching_freq_max': self.matching_freq_max_edit.text(),
             'peak_threshold_pct': self.peak_thresh_value if hasattr(self, 'peak_thresh_value') else 0.05,
-            'min_distance': float(self.min_distance_edit.text()),
+            'min_distance': float(self.min_distance_edit.text()) if self.min_distance_edit.text().strip() else 0.0,
             'fref_min': self.fref_min_edit.text(),
             'fref_max': self.fref_max_edit.text(),
             'harmonics': self.harmonics_edit.text(),
@@ -251,7 +280,20 @@ class RionID_GUI(QWidget):
             'circ_step': self.circ_step_edit.text(),
             'hist_freq_min': getattr(self, '_hist_freq_min', None),
             'hist_freq_max': getattr(self, '_hist_freq_max', None),
-            'hist_bins': getattr(self, '_hist_bins', None)
+            'hist_bins': getattr(self, '_hist_bins', None),
+            'afc_time_file': getattr(self, '_afc_time_file', ''),
+            'afc_voltage_file': getattr(self, '_afc_voltage_file', ''),
+            'afc_xmin': getattr(self, '_afc_xmin', ''),
+            'afc_xmax': getattr(self, '_afc_xmax', ''),
+            'afc_ymin': getattr(self, '_afc_ymin', ''),
+            'afc_ymax': getattr(self, '_afc_ymax', ''),
+            'afc_logz': getattr(self, '_afc_logz', False),
+            'afc_show_proj': getattr(self, '_afc_show_proj', False),
+            'afc_offset': getattr(self, '_afc_offset', '5'),
+            'afc_dt': getattr(self, '_afc_dt', '20'),
+            'afc_split': getattr(self, '_afc_split', '65'),
+            'afc_threshold_path': getattr(self, '_afc_threshold_path', ''),
+            'afc_peak_dist': getattr(self, '_afc_peak_dist', '3'),
         }
         with open(filepath, 'w') as f:
             toml.dump(parameters, f)
@@ -270,8 +312,27 @@ class RionID_GUI(QWidget):
         self.vbox = QVBoxLayout(scroll_content)
         self.scroll_area.setWidget(scroll_content)       
         # Set scroll_area as main layout of this QWidget
-        self.setLayout(QVBoxLayout())                
-        self.layout().addWidget(self.scroll_area)  
+        self.setLayout(QVBoxLayout())
+        self.layout().addWidget(self.scroll_area)
+
+        # ──── AFC&gtr Calculator button at the very top ────
+        self.afc_calculator_button = QPushButton('AFC && gtr Calculator')
+        self.afc_calculator_button.setFont(common_font)
+        self.afc_calculator_button.setStyleSheet("""
+            QPushButton {
+                background-color: #9C27B0;
+                color: white;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7B1FA2;
+            }
+        """)
+        self.afc_calculator_button.clicked.connect(self._open_afc_calculator)
+        hbox_afc = QHBoxLayout()
+        hbox_afc.addWidget(self.afc_calculator_button)
+        self.vbox.addLayout(hbox_afc)
+
         
         self.setup_file_selection()
         self.setup_parameters()
@@ -894,7 +955,65 @@ class RionID_GUI(QWidget):
         
     def close_application(self):
         sys.exit()
-        
+
+    def _open_afc_calculator(self):
+        """Open the AFC&gtr Calculator dialog with saved paths and settings."""
+        dialog = AFCCalculatorDialog(self)
+        # Restore saved state
+        dialog.time_edit.setText(self._afc_time_file)
+        dialog.voltage_edit.setText(self._afc_voltage_file)
+        dialog.xmin_edit.setText(self._afc_xmin)
+        dialog.xmax_edit.setText(self._afc_xmax)
+        dialog.ymin_edit.setText(self._afc_ymin)
+        dialog.ymax_edit.setText(self._afc_ymax)
+        dialog.logz_checkbox.setChecked(self._afc_logz)
+        dialog.show_proj_checkbox.setChecked(self._afc_show_proj)
+        dialog.proj_offset_edit.setText(self._afc_offset)
+        dialog.proj_dt_edit.setText(self._afc_dt)
+        dialog.split_ratio_edit.setText(self._afc_split)
+        if self._afc_threshold_path:
+            dialog.thresh_path_edit.setText(self._afc_threshold_path)
+            dialog._load_threshold_profile(self._afc_threshold_path)
+        dialog.peak_dist_edit.setText(self._afc_peak_dist)
+        # Save paths immediately when user clicks "Load Data & Plot"
+        dialog.paths_changed.connect(self._on_afc_paths_changed)
+        dialog.exec_()
+        # Read back all state on close
+        self._afc_time_file = dialog.time_edit.text().strip()
+        self._afc_voltage_file = dialog.voltage_edit.text().strip()
+        self._afc_xmin = dialog.xmin_edit.text().strip()
+        self._afc_xmax = dialog.xmax_edit.text().strip()
+        self._afc_ymin = dialog.ymin_edit.text().strip()
+        self._afc_ymax = dialog.ymax_edit.text().strip()
+        self._afc_logz = dialog.logz_checkbox.isChecked()
+        self._afc_show_proj = dialog.show_proj_checkbox.isChecked()
+        self._afc_offset = dialog.proj_offset_edit.text().strip()
+        self._afc_dt = dialog.proj_dt_edit.text().strip()
+        self._afc_split = dialog.split_ratio_edit.text().strip()
+        self._afc_threshold_path = dialog.thresh_path_edit.text().strip()
+        self._afc_peak_dist = dialog.peak_dist_edit.text().strip()
+        self.save_parameters()
+
+    def _on_afc_paths_changed(self, time_file, voltage_file):
+        """Slot for AFCCalculatorDialog.paths_changed — save paths immediately."""
+        self._afc_time_file = time_file
+        self._afc_voltage_file = voltage_file
+        # Fetch all state from the dialog
+        sender = self.sender()
+        if sender is not None:
+            self._afc_xmin = sender.xmin_edit.text().strip()
+            self._afc_xmax = sender.xmax_edit.text().strip()
+            self._afc_ymin = sender.ymin_edit.text().strip()
+            self._afc_ymax = sender.ymax_edit.text().strip()
+            self._afc_logz = sender.logz_checkbox.isChecked()
+            self._afc_show_proj = sender.show_proj_checkbox.isChecked()
+            self._afc_offset = sender.proj_offset_edit.text().strip()
+            self._afc_dt = sender.proj_dt_edit.text().strip()
+            self._afc_split = sender.split_ratio_edit.text().strip()
+            self._afc_threshold_path = sender.thresh_path_edit.text().strip()
+            self._afc_peak_dist = sender.peak_dist_edit.text().strip()
+        self.save_parameters()
+
     def browse_datafile(self):
         options = QFileDialog.Options()
         datafile, _ = QFileDialog.getOpenFileName(self, "Select Data File", "", "All Files (*);;NPZ Files (*.npz)", options= options)
