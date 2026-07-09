@@ -6,6 +6,8 @@ plotting a 2D spectrogram with voltage event markers.
 """
 
 import sys
+import os
+import json
 import logging as _log
 _log.getLogger('matplotlib.ticker').setLevel(_log.WARNING)
 
@@ -93,14 +95,17 @@ class AFCCalculatorDialog(QDialog):
         self._font_scale = 1.0  # font size multiplier
         self._locked_ax_positions = []  # list of [x0, y0, w, h] per axis in figure coords
         self._last_res_params = None  # (A0, Q, f_sys) from last resonance fit
+        self._config_path = os.path.join(os.getcwd(), "afc_calculator_config.json")
 
         self._init_ui()
 
         # ── Auto-load threshold CSV from cwd if it exists ──
-        import os as _os
-        default_thresh = _os.path.join(_os.getcwd(), "height_thresh.csv")
-        if _os.path.exists(default_thresh):
+        default_thresh = os.path.join(os.getcwd(), "height_thresh.csv")
+        if os.path.exists(default_thresh):
             self._load_threshold_profile(default_thresh)
+
+        # ── Load saved config ──
+        self._load_config()
 
         # ── Maximise to near-full-screen ──
         screen = QDesktopWidget().screenGeometry(-1)
@@ -227,6 +232,22 @@ class AFCCalculatorDialog(QDialog):
         self.thresh_update_btn.clicked.connect(self._on_thresh_update)
         thresh_layout.addWidget(self.thresh_update_btn)
 
+        # ── Baseline removal controls ──
+        thresh_layout.addSpacing(8)
+        thresh_layout.addWidget(QLabel("l:"))
+        self.baseline_l_edit = QLineEdit("100")
+        self.baseline_l_edit.setMaximumWidth(35)
+        thresh_layout.addWidget(self.baseline_l_edit)
+        thresh_layout.addWidget(QLabel("ratio:"))
+        self.baseline_ratio_edit = QLineEdit("0.001")
+        self.baseline_ratio_edit.setMaximumWidth(40)
+        thresh_layout.addWidget(self.baseline_ratio_edit)
+        self.remove_baseline_btn = QPushButton("Remove Baseline")
+        self.remove_baseline_btn.setFont(QFont("", 9))
+        self.remove_baseline_btn.setStyleSheet("background-color: #FF5722; color: white; border-radius: 3px;")
+        self.remove_baseline_btn.clicked.connect(self._remove_baseline_projections)
+        thresh_layout.addWidget(self.remove_baseline_btn)
+
         main_layout.addWidget(thresh_frame)
 
         # ── Axis range controls ──
@@ -259,19 +280,6 @@ class AFCCalculatorDialog(QDialog):
         range_layout.addWidget(self.ymax_edit)
 
         range_layout.addSpacing(10)
-
-        range_layout.addWidget(QLabel("Fig size:"))
-        self.fig_width_edit = QLineEdit("8")
-        self.fig_width_edit.setMaximumWidth(35)
-        range_layout.addWidget(self.fig_width_edit)
-        range_layout.addWidget(QLabel("×"))
-        self.fig_height_edit = QLineEdit("7")
-        self.fig_height_edit.setMaximumWidth(35)
-        range_layout.addWidget(self.fig_height_edit)
-        self.figsize_apply_btn = QPushButton("Apply")
-        self.figsize_apply_btn.setStyleSheet("background-color: #FF9800; color: white; border-radius: 3px; padding: 1px 6px;")
-        self.figsize_apply_btn.clicked.connect(self._on_figsize_changed)
-        range_layout.addWidget(self.figsize_apply_btn)
 
         range_layout.addSpacing(5)
         self.reset_range_btn = QPushButton("Reset")
@@ -315,10 +323,20 @@ class AFCCalculatorDialog(QDialog):
         self.find_peaks_btn.setStyleSheet("background-color: #9C27B0; color: white; padding: 2px 8px; border-radius: 3px;")
         self.find_peaks_btn.clicked.connect(self._find_peaks_projections)
         range_layout.addWidget(self.find_peaks_btn)
-        range_layout.addWidget(QLabel("dist:"))
-        self.peak_dist_edit = QLineEdit("3")
-        self.peak_dist_edit.setMaximumWidth(35)
+        range_layout.addWidget(QLabel("dist(MHz):"))
+        self.peak_dist_edit = QLineEdit("0.003")
+        self.peak_dist_edit.setMaximumWidth(40)
         range_layout.addWidget(self.peak_dist_edit)
+        range_layout.addWidget(QLabel("width:"))
+        self.bg_width_edit = QLineEdit("0.001")
+        self.bg_width_edit.setMaximumWidth(40)
+        self.bg_width_edit.setToolTip("Integration width for both peak and background (MHz)")
+        range_layout.addWidget(self.bg_width_edit)
+        range_layout.addWidget(QLabel("gap:"))
+        self.bg_gap_edit = QLineEdit("0.001")
+        self.bg_gap_edit.setMaximumWidth(30)
+        self.bg_gap_edit.setToolTip("Gap between peak interval and bg interval (MHz)")
+        range_layout.addWidget(self.bg_gap_edit)
 
         self.fit_har_btn = QPushButton("Fit Har")
         self.fit_har_btn.setStyleSheet("background-color: #E91E63; color: white; padding: 2px 8px; border-radius: 3px;")
@@ -395,6 +413,105 @@ class AFCCalculatorDialog(QDialog):
         main_layout.addWidget(self.toolbar)
         main_layout.addWidget(self.canvas, 1)
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # Config persistence
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    def _save_config(self):
+        """Save all panel parameters to JSON config file."""
+        try:
+            cfg = {}
+            # File paths
+            cfg['time_file'] = self.time_edit.text().strip()
+            cfg['voltage_file'] = self.voltage_edit.text().strip()
+            cfg['threshold_path'] = self.thresh_path_edit.text().strip()
+
+            # Range controls
+            for k in ('xmin_edit','xmax_edit','ymin_edit','ymax_edit',
+                      'proj_offset_edit','proj_dt_edit','split_ratio_edit',
+                      'peak_dist_edit','bg_width_edit','bg_gap_edit',
+                      'baseline_l_edit','baseline_ratio_edit',
+                      'font_scale_edit','har_offset_edit', 'har_vs_time_edit'):
+                w = getattr(self, k, None)
+                if w is not None:
+                    cfg[k] = w.text()
+
+            cfg['har_per_offset'] = self.har_per_offset_edit.text().strip()
+            cfg['norm_ref'] = self.norm_ref_combo.currentText() if hasattr(self, 'norm_ref_combo') else "Norm: 1st peak"
+
+            # Checkboxes
+            cfg['log_z'] = self.logz_checkbox.isChecked() if hasattr(self, 'logz_checkbox') else False
+            cfg['show_thresh'] = self.show_thresh_checkbox.isChecked() if hasattr(self, 'show_thresh_checkbox') else True
+            cfg['show_proj'] = self.show_proj_checkbox.isChecked() if hasattr(self, 'show_proj_checkbox') else False
+
+            # Resonance params
+            if self._last_res_params is not None:
+                cfg['A0'], cfg['Q'], cfg['f_sys'] = self._last_res_params
+
+            with open(self._config_path, 'w') as f:
+                json.dump(cfg, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_config(self):
+        """Load panel parameters from JSON config file."""
+        if not os.path.exists(self._config_path):
+            return
+        try:
+            with open(self._config_path, 'r') as f:
+                cfg = json.load(f)
+
+            # File paths
+            for k, attr in [('time_file','time_edit'),('voltage_file','voltage_edit'),
+                            ('threshold_path','thresh_path_edit')]:
+                if k in cfg:
+                    w = getattr(self, attr, None)
+                    if w is not None:
+                        w.setText(cfg[k])
+
+            # Numeric text fields
+            for k in ('xmin_edit','xmax_edit','ymin_edit','ymax_edit',
+                      'proj_offset_edit','proj_dt_edit','split_ratio_edit',
+                      'peak_dist_edit','bg_width_edit','bg_gap_edit',
+                      'baseline_l_edit','baseline_ratio_edit',
+                      'font_scale_edit','har_offset_edit', 'har_vs_time_edit'):
+                if k in cfg:
+                    w = getattr(self, k, None)
+                    if w is not None:
+                        w.setText(cfg[k])
+
+            if 'har_per_offset' in cfg:
+                self.har_per_offset_edit.setText(cfg['har_per_offset'])
+            if 'norm_ref' in cfg:
+                idx = self.norm_ref_combo.findText(cfg['norm_ref'])
+                if idx >= 0:
+                    self.norm_ref_combo.setCurrentIndex(idx)
+
+            # Checkboxes
+            if 'log_z' in cfg:
+                self.logz_checkbox.setChecked(cfg['log_z'])
+            if 'show_thresh' in cfg:
+                self.show_thresh_checkbox.setChecked(cfg['show_thresh'])
+            if 'show_proj' in cfg:
+                self.show_proj_checkbox.setChecked(cfg['show_proj'])
+
+            # Font scale
+            if 'font_scale_edit' in cfg:
+                try:
+                    self._font_scale = float(cfg['font_scale_edit'])
+                except ValueError:
+                    pass
+
+            # Resonance params
+            if all(k in cfg for k in ('A0','Q','f_sys')):
+                self._last_res_params = (cfg['A0'], cfg['Q'], cfg['f_sys'])
+        except Exception:
+            pass
+
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # File dialogs
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # File dialogs
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -568,6 +685,7 @@ class AFCCalculatorDialog(QDialog):
         if path:
             self._load_threshold_profile(path)
         self._redraw_projections()
+        self._save_config()
 
     def _get_threshold_curve(self):
         """Interpolate threshold profile onto self.freq_data grid.
@@ -587,6 +705,45 @@ class AFCCalculatorDialog(QDialog):
         self.thresh_path_edit.clear()
         print("✅ Threshold profile cleared")
         self._redraw_projections()
+        self._save_config()
+
+    def _remove_baseline_projections(self):
+        """Remove baseline from all projections using BrPLS."""
+        if self._projections is None or len(self._projections) == 0:
+            QMessageBox.warning(self, "Warning", "No projections computed yet — click Project first")
+            return
+        try:
+            l_val = float(self.baseline_l_edit.text())
+            ratio_val = float(self.baseline_ratio_edit.text())
+        except ValueError:
+            QMessageBox.warning(self, "Warning", "Invalid l or ratio value")
+            return
+
+        freq = self.freq_data
+        proj_list_bl = []
+        proj_list_clean = []
+
+        for i, proj in enumerate(self._projections):
+            try:
+                baseline = NONPARAMS_EST(proj).pls('BrPLS', l=l_val, ratio=ratio_val)
+                clean = proj - baseline
+                proj_list_bl.append(baseline)
+                proj_list_clean.append(clean)
+            except Exception as e:
+                self._write_debug(f"Baseline removal failed for projection {i}: {e}")
+                proj_list_bl.append(np.zeros_like(proj))
+                proj_list_clean.append(proj)
+
+        self._projections_baseline = np.array(proj_list_bl)
+        self._projections_clean = np.array(proj_list_clean)
+        # Reset peaks since data changed
+        self._projections_peaks = None
+        self._projections_peak_data = None
+        self._projections_peak_masks = None
+        self._projections_har_fit = None
+        print(f"✅ Baseline removed from {len(proj_list_clean)} projections (l={l_val}, ratio={ratio_val})")
+        self._redraw_projections()
+        self._save_config()
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Data loading
@@ -611,6 +768,7 @@ class AFCCalculatorDialog(QDialog):
             self._draw_plots()
             # Emit signal so the parent can save paths immediately
             self.paths_changed.emit(time_path, volt_path)
+            self._save_config()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Data load or plot failed:\n{str(e)}")
             import traceback
@@ -631,6 +789,7 @@ class AFCCalculatorDialog(QDialog):
                 self._compute_projections()
             self._draw_plots()
             self.paths_changed.emit(self.time_edit.text().strip(), volt_path)
+            self._save_config()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Voltage update failed:\n{str(e)}")
             import traceback
@@ -725,10 +884,9 @@ class AFCCalculatorDialog(QDialog):
         # ── .root / cached .npz ──
         elif path.lower().endswith('.root'):
             # Check if a cached .npz exists in cwd
-            import os as _os
-            basename = _os.path.splitext(_os.path.basename(path))[0]
-            cache_path = _os.path.join(_os.getcwd(), basename + "_spectrogram.npz")
-            if _os.path.exists(cache_path):
+            basename = os.path.splitext(os.path.basename(path))[0]
+            cache_path = os.path.join(os.getcwd(), basename + "_spectrogram.npz")
+            if os.path.exists(cache_path):
                 self._write_debug(f"DEBUG: loading cached npz: {cache_path}")
                 data = np.load(cache_path)
                 self.time_data = data['time_data']
@@ -945,9 +1103,8 @@ class AFCCalculatorDialog(QDialog):
 
         # ── Save as cached .npz in current directory ──
         try:
-            import os as _os
-            base_in = _os.path.splitext(_os.path.basename(path))[0]
-            cache_path = _os.path.join(_os.getcwd(), base_in + "_spectrogram.npz")
+            base_in = os.path.splitext(os.path.basename(path))[0]
+            cache_path = os.path.join(os.getcwd(), base_in + "_spectrogram.npz")
             np.savez(cache_path,
                      time_data=self.time_data,
                      freq_data=self.freq_data,
@@ -993,6 +1150,7 @@ class AFCCalculatorDialog(QDialog):
         })
         # Update constrained_layout padding to leave room for larger labels
         self.canvas.fig.set_constrained_layout_pads(h_pad=0.04 * s, hspace=0)
+        self._save_config()
         if self.spectrogram_data is not None or self.freq_data is not None:
             self._draw_plots()
 
@@ -1115,6 +1273,7 @@ class AFCCalculatorDialog(QDialog):
             return
         self._compute_projections()
         self._draw_plots()
+        self._save_config()
 
     def _detect_peaks_one(self, freq, amp):
         """Replicate ImportData.detect_peaks_and_widths logic on a single projection.
@@ -1140,8 +1299,9 @@ class AFCCalculatorDialog(QDialog):
             height_thresh = np.full_like(amp, np.max(amp) * 0.2, dtype=float)
 
         # 2) Same parameters as detect_peaks_and_widths
+        df = max(freq[1] - freq[0], 1e-12)
         try:
-            min_dist = max(1.0, float(self.peak_dist_edit.text()))
+            min_dist = max(1.0, float(self.peak_dist_edit.text()) / df)
         except (ValueError, AttributeError):
             min_dist = 3.0
         min_prom  = np.maximum(height_thresh * 0.3, 0.0)
@@ -1168,16 +1328,26 @@ class AFCCalculatorDialog(QDialog):
         bg_right_idxs = np.zeros_like(peaks, dtype=int)
         if len(peaks) > 0:
             try:
-                from scipy.signal import peak_widths as _pw
-                widths, _, left_ips, right_ips = _pw(amp, peaks, rel_height=0.5)
-                left_idx = np.clip(np.round(left_ips).astype(int), 0, len(freq)-1)
-                right_idx = np.clip(np.round(right_ips).astype(int), 0, len(freq)-1)
-                left_idxs = left_idx
-                right_idxs = right_idx
-                peak_widths_freq = freq[right_idx] - freq[left_idx]
-                for j, (li, ri) in enumerate(zip(left_idx, right_idx)):
+                # Read shared integration width from text box
+                df = max(freq[1] - freq[0], 1e-12)
+                try:
+                    half_mhz = max(0.0, float(self.bg_width_edit.text())) / 2.0
+                except (ValueError, AttributeError):
+                    half_mhz = 0.0005
+                half_bins = max(1, int(round(half_mhz / df)))
+                try:
+                    gap_mhz = max(0.0, float(self.bg_gap_edit.text()))
+                except (ValueError, AttributeError):
+                    gap_mhz = 0.001
+                gap = max(1, int(round(gap_mhz / df)))
+
+                for j, p in enumerate(peaks):
+                    li = max(0, p - half_bins)
+                    ri = min(len(freq) - 1, p + half_bins)
+                    left_idxs[j] = li
+                    right_idxs[j] = ri
+                    peak_widths_freq[j] = freq[ri] - freq[li]
                     peak_areas[j] = np.trapz(amp[li:ri+1], freq[li:ri+1])
-                    # Amplitude-weighted mean frequency (centroid) within +/-FWHM
                     f_region = freq[li:ri+1]
                     a_region = amp[li:ri+1]
                     a_sum = np.sum(a_region)
@@ -1189,18 +1359,16 @@ class AFCCalculatorDialog(QDialog):
                         peak_means[j] = f_region[len(f_region)//2]
                         peak_stds[j] = 0.0
 
-                    # ── Background region: same width, placed to the left with a gap ──
-                    width = ri - li
-                    gap = max(1, width // 4)
-                    bg_li = li - width - gap
-                    bg_ri = bg_li + width
+                    # Background region: same width, placed left with a gap
+                    bg_li = li - half_bins*2 - gap
+                    bg_ri = bg_li + half_bins*2
                     if bg_li < 0 or bg_ri >= len(freq):
-                        # Fallback: place to the right
-                        bg_li = min(len(freq) - 1 - width, ri + gap)
-                        bg_ri = bg_li + width
+                        bg_li = min(len(freq) - 1 - half_bins*2, ri + gap)
+                        bg_ri = bg_li + half_bins*2
                     bg_levels[j] = np.trapz(amp[bg_li:bg_ri+1], freq[bg_li:bg_ri+1])
                     bg_left_idxs[j] = int(bg_li)
                     bg_right_idxs[j] = int(bg_ri)
+
             except Exception:
                 pass
 
@@ -1257,11 +1425,11 @@ class AFCCalculatorDialog(QDialog):
         print(f"✅ Found {n_total} peaks in {len(data_source)} projections")
         self._save_peaks_csv(all_peaks)
         self._redraw_projections()
+        self._save_config()
 
     def _save_peaks_csv(self, all_peaks):
         """Export peaks to CSV: time, voltage, frequency, height, FWHM, area, mean, std."""
-        import os as _os
-        csv_path = _os.path.join(_os.getcwd(), "afc_peaks.csv")
+        csv_path = os.path.join(os.getcwd(), "afc_peaks.csv")
         try:
             with open(csv_path, 'w') as f:
                 f.write("time_s,voltage_V,frequency_MHz,height,FWHM_MHz,area,mean,std\n")
@@ -1362,10 +1530,9 @@ class AFCCalculatorDialog(QDialog):
 
     def _resave_peaks_csv(self):
         """Re-save afc_peaks.csv respecting current masks."""
-        import os as _os
         if self._projections_peak_data is None:
             return
-        csv_path = _os.path.join(_os.getcwd(), "afc_peaks.csv")
+        csv_path = os.path.join(os.getcwd(), "afc_peaks.csv")
         try:
             with open(csv_path, 'w') as f:
                 f.write("time_s,voltage_V,frequency_MHz,height,FWHM_MHz,area,mean,std,kept\n")
@@ -1635,8 +1802,7 @@ class AFCCalculatorDialog(QDialog):
             canvas.draw()
 
             # Save CSV
-            import os as _os
-            csv_path = _os.path.join(_os.getcwd(), "afc_norm_area.csv")
+            csv_path = os.path.join(os.getcwd(), "afc_norm_area.csv")
             try:
                 with open(csv_path, 'w') as f:
                     f.write("proj_idx,time_s,voltage_V,freq_MHz,norm_area,fitted_curve,residual\n")
@@ -1710,6 +1876,9 @@ class AFCCalculatorDialog(QDialog):
             bg_val = (pk['bg_levels'][match_idx] if 'bg_levels' in pk and match_idx < len(pk['bg_levels'])
                       else 0)
             net_area = area_val - bg_val
+            # Divide by frames to match the A/f shown on projection plots
+            nfr = int(self._proj_nframes[i]) if self._proj_nframes is not None and i < len(self._proj_nframes) else 1
+            net_area /= max(1, nfr)
 
             times.append(float(tv))
             volts.append(float(vv))
@@ -1899,7 +2068,7 @@ class AFCCalculatorDialog(QDialog):
             QMessageBox.warning(self, "Warning", "Not enough peaks for fitting (need ≥4)")
             return
 
-        f_ref = float(proj_freqs[0][0])  # first projection, first peak
+        f_ref = float(proj_freqs[0][norm_ref_index])  # first projection, reference peak
 
         # ── Collect target-harmonic data for decay fitting ──
         har_times, har_freqs, har_raw = [], [], []
@@ -1921,7 +2090,9 @@ class AFCCalculatorDialog(QDialog):
             har_times.append(float(tv))
             har_freqs.append(float(pk.get('means', pk['freqs'])[midx]))
             bg_v = (pk['bg_levels'][midx] if 'bg_levels' in pk and midx < len(pk['bg_levels']) else 0)
-            har_raw.append(float(pk['areas'][midx] - bg_v))
+            net_v = pk['areas'][midx] - bg_v
+            nfr = int(self._proj_nframes[i]) if self._proj_nframes is not None and i < len(self._proj_nframes) else 1
+            har_raw.append(float(net_v / max(1, nfr)))
 
         arr_har_t = np.array(har_times)
         arr_har_f = np.array(har_freqs)
@@ -1973,13 +2144,14 @@ class AFCCalculatorDialog(QDialog):
             for pi in range(len(proj_freqs)):
                 # Normalize first (same as lines 1890-1891)
                 norm_area = proj_areas[pi] / proj_areas[pi][norm_ref_index]
-                f_first = float(proj_freqs[pi][0])
+                f_first = float(proj_freqs[pi][norm_ref_index])
                 af_i = max(self._resonance_func(f_first, fit_A0, fit_Q, fit_fs), 1e-30)
                 out.extend((norm_area * (af_i / af_ref)).tolist())
             return np.array(out)
 
         # ── Helper: redraw both panels ──
-        def _draw_panels(corr_a, fit_A0, fit_Q, fit_fs, title_extra=""):
+        def _draw_panels(corr_a, fit_A0, fit_Q, fit_fs, title_extra="",
+                         A0_err=None, Q_err=None, fs_err=None):
             ax_top.clear()
             ax_bot.clear()
             colors = __import__('matplotlib.cm', fromlist=['tab10']).tab10(
@@ -1998,9 +2170,12 @@ class AFCCalculatorDialog(QDialog):
             r_grid = self._resonance_func(f_grid, fit_A0, fit_Q, fit_fs)
             ax_top.plot(f_grid, r_grid, 'r-', linewidth=1.5)
 
-            r_txt = (f"$A_0$ = {fit_A0:.4e}\n"
-                     f"$Q$ = {fit_Q:.0f}\n"
-                     r"$f_{{\rm sys}}$" + f" = {fit_fs:.6f} MHz\n"
+            A0_str = f"{fit_A0:.4e}" if A0_err is None else f"{fit_A0:.4e} +/- {A0_err:.4e}"
+            Q_str = f"{fit_Q:.0f}" if Q_err is None else f"{fit_Q:.0f} +/- {Q_err:.0f}"
+            fs_str = f"{fit_fs:.6f}" if fs_err is None else f"{fit_fs:.6f} +/- {fs_err:.6f}"
+            r_txt = (f"$A_0$ = {A0_str}\n"
+                     f"$Q$ = {Q_str}\n"
+                     r"$f_{{\rm sys}}$" + f" = {fs_str} MHz\n"
                      f"$f_{{\\rm ref}}$ = {f_ref:.6f} MHz")
             ax_top.text(0.97, 0.97, r_txt, transform=ax_top.transAxes,
                         fontsize=8, fontfamily='monospace',
@@ -2081,10 +2256,12 @@ class AFCCalculatorDialog(QDialog):
             self._sc_A0_edit.setText(f"{A0:.6e}")
             self._sc_Q_edit.setText(f"{Q_sys:.0f}")
             self._sc_fsys_edit.setText(f"{f_sys:.6f}")
+            A0_e = rf.GetParError(0); Q_e = rf.GetParError(1); fs_e = rf.GetParError(2)
             cur_corr[0] = _apply_af(A0, Q_sys, f_sys)
             cur_iter[0] += 1
-            _draw_panels(cur_corr[0], A0, Q_sys, f_sys, f"Iteration {cur_iter[0]}")
-            iter_info.setText(f"Iteration {cur_iter[0]}: A0={A0:.4e} Q={Q_sys:.0f} f_sys={f_sys:.6f}")
+            _draw_panels(cur_corr[0], A0, Q_sys, f_sys, f"Iteration {cur_iter[0]}",
+                         A0_err=A0_e, Q_err=Q_e, fs_err=fs_e)
+            iter_info.setText(f"Iter {cur_iter[0]}: A0={A0:.4e} +/- {A0_e:.4e}  Q={Q_sys:.0f} +/- {Q_e:.0f}  f_sys={f_sys:.6f} +/- {fs_e:.6f}")
 
         def _do_fit_decay():
             if len(arr_har_a) < 3:
@@ -2103,11 +2280,17 @@ class AFCCalculatorDialog(QDialog):
                 ax_bot.clear()
                 ax_bot.scatter(arr_har_t, har_c, c='#E91E63', s=20, marker='s', label=f'Har #{target_har}', zorder=3)
                 tf = np.linspace(arr_har_t.min(), arr_har_t.max(), 300)
-                ax_bot.plot(tf, np.exp(-lam_f*(tf-t0_har)), 'g-', linewidth=1.8, label=f'λ={lam_f:.4e}')
+                ax_bot.plot(tf, np.exp(-lam_f*(tf-t0_har)), 'g-', linewidth=1.8, label=f'Fit')
                 ax_bot.set_xlabel("Time (s)"); ax_bot.set_ylabel("Norm. Area (R-corrected)")
+                d_txt = (f"$\\lambda$={lam_f:.4e}$\\pm${lam_e:.4e} s$^{{-1}}$\n"
+                         f"$T_{{1/2}}$={hl:.2f}$\\pm${hl_e:.2f} s")
+                ax_bot.text(0.97, 0.97, d_txt, transform=ax_bot.transAxes,
+                            fontsize=9, fontfamily='monospace', verticalalignment='top',
+                            horizontalalignment='right',
+                            bbox=dict(boxstyle='round', facecolor='#E8F5E9', alpha=0.85))
                 ax_bot.legend(fontsize=8); ax_bot.grid(alpha=0.3)
                 canvas.draw()
-                iter_info.setText(f"λ={lam_f:.4e}±{lam_e:.4e} s-1, T1/2={hl:.2f}±{hl_e:.2f} s")
+                iter_info.setText(f"lambda={lam_f:.4e}+/-{lam_e:.4e} s-1, T1/2={hl:.2f}+/-{hl_e:.2f} s")
             except Exception as e:
                 iter_info.setText(f"Decay fit failed: {e}")
 
@@ -2127,8 +2310,7 @@ class AFCCalculatorDialog(QDialog):
             return
 
         from scipy import stats as _stats
-        import os as _os
-        csv_path = _os.path.join(_os.getcwd(), "afc_harmonics.csv")
+        csv_path = os.path.join(os.getcwd(), "afc_harmonics.csv")
         self._projections_har_fit = []
 
         try:
@@ -2248,6 +2430,7 @@ class AFCCalculatorDialog(QDialog):
 
             print(f"✅ Harmonic fit saved to {csv_path}")
             self._redraw_projections()
+            self._save_config()
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Harmonic fitting failed:\n{str(e)}")
@@ -2287,13 +2470,16 @@ class AFCCalculatorDialog(QDialog):
             ax.clear()
             if i < len(show_indices):
                 orig_idx = show_indices[i]
-                self._draw_single_projection(ax, orig_idx, is_bottom=(i == len(show_indices) - 1))
+                self._draw_single_projection(ax, orig_idx, is_bottom=(i == 0))
             else:
                 ax.set_visible(False)
-        # Redraw, then restore locked positions so constrained_layout doesn't shift axes
+        # Redraw with constrained_layout disabled so locked positions are preserved
+        was_cl = self.canvas.fig.get_constrained_layout()
+        self.canvas.fig.set_constrained_layout(False)
         self.canvas.fig.canvas.draw()
         self._restore_locked_positions()
         self.canvas.fig.canvas.draw_idle()
+        self.canvas.fig.set_constrained_layout(was_cl)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # Plotting
