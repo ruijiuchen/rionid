@@ -45,7 +45,8 @@ rionid/
     ├── __main__.py            # GUI 入口
     ├── gui.py                 # 主窗口 (MainWindow, QSplitter)
     ├── gui_controller.py      # 控制器 (import_controller, 输出保存)
-    └── parameter_gui.py       # 参数面板 (RionID_GUI)
+    ├── parameter_gui.py       # 参数面板 (RionID_GUI)
+    └── afc_calculator.py      # AFC&gtr 频谱分析面板
 ```
 
 ---
@@ -199,6 +200,22 @@ f[i] = f_rev[i] × h                                # 第 h 次谐波频率
 | `IMS_pid_script()` | "Run IMS"：自动扫描 Bρ 和 ring circumference，带进度条 |
 | `HistogramConfigDialog` | 柱状图参数设置对话框（x 范围、bin 宽度、预览） |
 | `enterPlotPickMode()` | 进入图谱点击取频率模式 |
+
+### `rionidgui/afc_calculator.py` — AFC&gtr Calculator
+
+AFC 频谱分析面板，提供实验时频谱数据的可视化与谐振参数提取。
+
+| 功能按钮 | 说明 |
+|---------|------|
+| **Load Data & Plot** | 载入实验时频谱（.npz/.root）和电压事件文件，绘制 2D 时频谱 |
+| **Project** | 按电压事件切分时频谱，提取每个事件的频率投影 |
+| **Find Peaks** | 在每个投影上检测峰，计算 **每帧面积误差** `area_err`（帧间波动标准差 × √N），输出 `afc_peaks.csv` |
+| **Fit Har** | 谐波数线性拟合，输出 `afc_harmonics.csv`（含 `area_err`） |
+| **Plot Norm Area** | **面积比谐振拟合**：以选定参考峰（1st / last / Max Area）为分母构建频对 (f₁, f₂)，洛伦兹比值模型 `R = \|H(f₁)\|²/\|H(f₂)\|²`，加权 `curve_fit` + **5000 次蒙特卡洛** 模拟，输出 Q 与 f_sys 及其不确定度 |
+| **Area vs Time** | 将选定谐波的面积按时间序列绘制（含误差棒），加权指数衰减拟合 |
+| **Self-consistent** | 迭代比值拟合 + AF 校正 → 指数衰减拟合 |
+
+**数据流**：`afc_peaks.csv` ← (Find Peaks) ← 频谱数据 → (Fit Har) → `afc_harmonics.csv`
 
 ### `rionidgui/gui_controller.py` — 控制器
 

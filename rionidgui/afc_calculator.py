@@ -19,6 +19,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 from matplotlib.colors import LogNorm, Normalize
 from matplotlib import gridspec
+from scipy.optimize import curve_fit
 from scipy.signal import find_peaks, peak_widths
 
 from rionid.nonparams_est import NONPARAMS_EST
@@ -358,9 +359,9 @@ class AFCCalculatorDialog(QDialog):
         self.norm_area_btn.clicked.connect(self._plot_normalized_areas)
         range_layout.addWidget(self.norm_area_btn)
         self.norm_ref_combo = QComboBox()
-        self.norm_ref_combo.addItems(["Norm: 1st peak", "Norm: last peak"])
+        self.norm_ref_combo.addItems(["Ref: 1st peak", "Ref: last peak", "Ref: Max Area"])
         self.norm_ref_combo.setMinimumWidth(100)
-        self.norm_ref_combo.setToolTip("Normalization reference peak")
+        self.norm_ref_combo.setToolTip("Reference peak for normalization within each projection")
         range_layout.addWidget(self.norm_ref_combo)
         range_layout.addSpacing(5)
         range_layout.addWidget(QLabel("Har#:"))
@@ -437,7 +438,7 @@ class AFCCalculatorDialog(QDialog):
                     cfg[k] = w.text()
 
             cfg['har_per_offset'] = self.har_per_offset_edit.text().strip()
-            cfg['norm_ref'] = self.norm_ref_combo.currentText() if hasattr(self, 'norm_ref_combo') else "Norm: 1st peak"
+            cfg['norm_ref'] = self.norm_ref_combo.currentText() if hasattr(self, 'norm_ref_combo') else "Ref: 1st peak"
 
             # Checkboxes
             cfg['log_z'] = self.logz_checkbox.isChecked() if hasattr(self, 'logz_checkbox') else False
@@ -1207,6 +1208,7 @@ class AFCCalculatorDialog(QDialog):
         self._projections_peak_data = None
         self._proj_voltages = None
         self._proj_nframes = None
+        self._projections_frame_data = None
 
         if self.spectrogram_data is None or self.time_data is None:
             return
@@ -1226,6 +1228,7 @@ class AFCCalculatorDialog(QDialog):
         proj_list = []
         volt_list = []
         nframe_list = []
+        frame_data_list = []
 
         for i, vt in enumerate(self.voltage_time):
             t_start = vt + offset_s
@@ -1239,6 +1242,7 @@ class AFCCalculatorDialog(QDialog):
             proj = spec[idx, :].sum(axis=0)
             proj_list.append(proj)
             nframe_list.append(len(idx))
+            frame_data_list.append(spec[idx, :].copy())  # store per-frame data for area statistics
             volt_val = self.voltage_data[i] if self.voltage_data is not None and i < len(self.voltage_data) else 0
             volt_list.append(volt_val)
             self._write_debug(f"DEBUG project: vt={vt:.1f}, range=[{t_start:.1f},{t_end:.1f}], idx={len(idx)} bins, sum={proj.sum():.1f}")
@@ -1247,6 +1251,7 @@ class AFCCalculatorDialog(QDialog):
             self._projections = np.array(proj_list)
             self._proj_voltages = np.array(volt_list)
             self._proj_nframes = np.array(nframe_list)
+            self._projections_frame_data = frame_data_list
             self._write_debug(f"DEBUG project: {len(proj_list)} projections, each {len(proj_list[0])} freq bins")
             # Populate projection combo box
             self.proj_combo.blockSignals(True)
@@ -1275,12 +1280,15 @@ class AFCCalculatorDialog(QDialog):
         self._draw_plots()
         self._save_config()
 
-    def _detect_peaks_one(self, freq, amp):
+    def _detect_peaks_one(self, freq, amp, frame_amp=None):
         """Replicate ImportData.detect_peaks_and_widths logic on a single projection.
 
         Uses threshold profile + prominence + distance matching the main GUI's settings.
+        If frame_amp (n_frames × n_freqs) is provided, also computes per-frame net area
+        and its uncertainty from frame-to-frame variation.
+
         Returns (peaks, peak_freqs, peak_heights, peak_widths_freq, peak_areas,
-                 peak_means, peak_stds, left_idxs, right_idxs,
+                 peak_areas_err, peak_means, peak_stds, left_idxs, right_idxs,
                  bg_levels, bg_left_idxs, bg_right_idxs).
         """
         # 1) Height threshold
@@ -1319,6 +1327,7 @@ class AFCCalculatorDialog(QDialog):
         peak_heights = props['peak_heights'] if 'peak_heights' in props else amp[peaks]
         peak_widths_freq = np.zeros_like(peak_freqs)
         peak_areas = np.zeros_like(peak_freqs)
+        peak_areas_err = np.zeros_like(peak_freqs)
         peak_means = np.zeros_like(peak_freqs)
         peak_stds = np.zeros_like(peak_freqs)
         left_idxs = np.zeros_like(peaks, dtype=int)
@@ -1369,11 +1378,26 @@ class AFCCalculatorDialog(QDialog):
                     bg_left_idxs[j] = int(bg_li)
                     bg_right_idxs[j] = int(bg_ri)
 
+                    # Per-frame area statistics (error from frame-to-frame variation)
+                    if frame_amp is not None:
+                        nf = frame_amp.shape[0]
+                        pk_per_frame = np.array([
+                            np.trapz(frame_amp[k, li:ri+1], freq[li:ri+1])
+                            for k in range(nf)
+                        ])
+                        bg_per_frame = np.array([
+                            np.trapz(frame_amp[k, bg_li:bg_ri+1], freq[bg_li:bg_ri+1])
+                            for k in range(nf)
+                        ])
+                        net_per_frame = pk_per_frame - bg_per_frame
+                        if nf > 1 and np.std(net_per_frame, ddof=1) > 0:
+                            peak_areas_err[j] = np.std(net_per_frame, ddof=1) * np.sqrt(nf)
+
             except Exception:
                 pass
 
         return (peaks, peak_freqs, peak_heights, peak_widths_freq, peak_areas,
-                peak_means, peak_stds, left_idxs, right_idxs,
+                peak_areas_err, peak_means, peak_stds, left_idxs, right_idxs,
                 bg_levels, bg_left_idxs, bg_right_idxs)
 
     def _find_peaks_projections(self):
@@ -1391,11 +1415,15 @@ class AFCCalculatorDialog(QDialog):
         for i, proj in enumerate(data_source):
             n_frames = int(self._proj_nframes[i]) if self._proj_nframes is not None and i < len(self._proj_nframes) else 1
             try:
-                (peaks, pf, ph, pwf, pa, pm, ps,
-                 lidx, ridx, bg_l, bg_li, bg_ri) = self._detect_peaks_one(freq, proj)
+                frame_amp = (self._projections_frame_data[i]
+                             if self._projections_frame_data is not None
+                             and i < len(self._projections_frame_data)
+                             else None)
+                (peaks, pf, ph, pwf, pa, pae, pm, ps,
+                 lidx, ridx, bg_l, bg_li, bg_ri) = self._detect_peaks_one(freq, proj, frame_amp)
                 all_peaks.append({
                     'indices': peaks, 'freqs': pf, 'heights': ph,
-                    'widths_freq': pwf, 'areas': pa,
+                    'widths_freq': pwf, 'areas': pa, 'areas_err': pae,
                     'means': pm, 'stds': ps,
                     'left_idxs': lidx, 'right_idxs': ridx,
                     'bg_levels': bg_l, 'bg_left_idxs': bg_li, 'bg_right_idxs': bg_ri,
@@ -1406,7 +1434,7 @@ class AFCCalculatorDialog(QDialog):
                 all_peaks.append({
                     'indices': np.array([], dtype=int),
                     'freqs': np.array([]), 'heights': np.array([]),
-                    'widths_freq': np.array([]), 'areas': np.array([]),
+                    'widths_freq': np.array([]), 'areas': np.array([]), 'areas_err': np.array([]),
                     'means': np.array([]), 'stds': np.array([]),
                     'left_idxs': np.array([], dtype=int),
                     'right_idxs': np.array([], dtype=int),
@@ -1428,21 +1456,22 @@ class AFCCalculatorDialog(QDialog):
         self._save_config()
 
     def _save_peaks_csv(self, all_peaks):
-        """Export peaks to CSV: time, voltage, frequency, height, FWHM, area, mean, std."""
+        """Export peaks to CSV: time, voltage, frequency, height, FWHM, area, area_err, mean, std."""
         csv_path = os.path.join(os.getcwd(), "afc_peaks.csv")
         try:
             with open(csv_path, 'w') as f:
-                f.write("time_s,voltage_V,frequency_MHz,height,FWHM_MHz,area,mean,std\n")
+                f.write("time_s,voltage_V,frequency_MHz,height,FWHM_MHz,area,area_err,mean,std\n")
                 for i, pk in enumerate(all_peaks):
                     tv = self.voltage_time[i] if self.voltage_time is not None and i < len(self.voltage_time) else i
                     vv = (self._proj_voltages[i] if self._proj_voltages is not None
                           and i < len(self._proj_voltages) else 0)
                     for j in range(len(pk['freqs'])):
+                        ae = pk.get('areas_err', [0])[j] if j < len(pk.get('areas_err', [])) else 0
                         mn = pk.get('means', [0])[j] if j < len(pk.get('means', [])) else 0
                         sd = pk.get('stds', [0])[j] if j < len(pk.get('stds', [])) else 0
                         f.write(f"{tv:.1f},{vv:.3f},{pk['freqs'][j]:.6f},"
                                 f"{pk['heights'][j]:.6e},{pk['widths_freq'][j]:.6f},"
-                                f"{pk['areas'][j]:.6e},{mn:.6e},{sd:.6e}\n")
+                                f"{pk['areas'][j]:.6e},{ae:.6e},{mn:.6e},{sd:.6e}\n")
             print(f"✅ Peaks saved to {csv_path}")
         except Exception as e:
             print(f"⚠️ Could not save peaks CSV: {e}")
@@ -1535,7 +1564,7 @@ class AFCCalculatorDialog(QDialog):
         csv_path = os.path.join(os.getcwd(), "afc_peaks.csv")
         try:
             with open(csv_path, 'w') as f:
-                f.write("time_s,voltage_V,frequency_MHz,height,FWHM_MHz,area,mean,std,kept\n")
+                f.write("time_s,voltage_V,frequency_MHz,height,FWHM_MHz,area,area_err,mean,std,kept\n")
                 for i, pk in enumerate(self._projections_peak_data):
                     mask = (self._projections_peak_masks[i]
                             if self._projections_peak_masks is not None
@@ -1546,12 +1575,13 @@ class AFCCalculatorDialog(QDialog):
                           and i < len(self._proj_voltages) else 0)
                     for j in range(len(pk['freqs'])):
                         kept = "1" if mask[j] else "0"
+                        ae = pk.get('areas_err', [0])[j] if j < len(pk.get('areas_err', [])) else 0
                         mn = pk.get('means', [0])[j] if j < len(pk.get('means', [])) else 0
                         sd = pk.get('stds', [0])[j] if j < len(pk.get('stds', [])) else 0
                         f.write(f"{tv:.1f},{vv:.3f},"
                                 f"{pk['freqs'][j]:.6f},{pk['heights'][j]:.6e},"
                                 f"{pk['widths_freq'][j]:.6f},{pk['areas'][j]:.6e},"
-                                f"{mn:.6e},{sd:.6e},{kept}\n")
+                                f"{ae:.6e},{mn:.6e},{sd:.6e},{kept}\n")
             print(f"✅ Peaks re-saved to {csv_path}")
         except Exception as e:
             print(f"⚠️ Could not re-save peaks CSV: {e}")
@@ -1592,20 +1622,107 @@ class AFCCalculatorDialog(QDialog):
     # Global normalized-area plot
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    def _plot_normalized_areas(self):
-        """Collect normalized peak areas across all projections, fit resonance curve and plot.
+    def _load_peaks_from_csv(self, csv_path=None):
+        """Load peak data from afc_peaks.csv into _projections_peak_data.
 
-        Normalization uses the first projection's first kept peak area as reference.
-        Top subplot: data + fit (log y).  Bottom subplot: residuals.
+        Called as fallback when no in-memory peak data exists.
+        Returns True on success.
         """
-        if self._projections_peak_data is None or len(self._projections_peak_data) == 0:
-            QMessageBox.warning(self, "Warning", "No peaks found — click Find Peaks first")
+        if csv_path is None:
+            csv_path = os.path.join(os.getcwd(), "afc_peaks.csv")
+        if not os.path.exists(csv_path):
+            return False
+        try:
+            # Read CSV manually to handle both old (8-col) and new (9-col) formats
+            with open(csv_path, 'r') as cf:
+                lines = [l.strip() for l in cf if l.strip()]
+            if len(lines) < 2:
+                return False
+            header = lines[0].split(',')
+            has_ae = 'area_err' in header
+            data = np.array([line.split(',') for line in lines[1:]], dtype=str)
+            if len(data) == 0:
+                return False
+            times   = data[:, 0].astype(float)
+            volts   = data[:, 1].astype(float)
+            freqs   = data[:, 2].astype(float)
+            heights = data[:, 3].astype(float)
+            fwhms   = data[:, 4].astype(float)
+            areas   = data[:, 5].astype(float)
+            if has_ae and data.shape[1] > 6:
+                areas_err = data[:, 6].astype(float)
+                mcol = 7; scol = 8
+            else:
+                areas_err = np.zeros_like(areas)
+                mcol = 6; scol = 7
+            means   = data[:, mcol].astype(float) if data.shape[1] > mcol else np.zeros_like(areas)
+            stds    = data[:, scol].astype(float) if data.shape[1] > scol else np.zeros_like(areas)
+            unique_times, inv_idx = np.unique(times, return_inverse=True)
+            self._projections_peak_data = []
+            self._projections_peak_masks = []
+            self._proj_voltages = []
+            self._proj_nframes = []
+            self.voltage_time = []
+            for pi in range(len(unique_times)):
+                mask = (inv_idx == pi)
+                n_peaks = int(mask.sum())
+                if n_peaks == 0:
+                    continue
+                self._projections_peak_data.append({
+                    'indices':      np.arange(n_peaks, dtype=int),
+                    'freqs':        freqs[mask].copy(),
+                    'heights':      heights[mask].copy(),
+                    'widths_freq':  fwhms[mask].copy(),
+                    'areas':        areas[mask].copy(),
+                    'areas_err':    areas_err[mask].copy(),
+                    'means':        means[mask].copy(),
+                    'stds':         stds[mask].copy(),
+                    'left_idxs':    np.zeros(n_peaks, dtype=int),
+                    'right_idxs':   np.zeros(n_peaks, dtype=int),
+                    'bg_levels':    np.zeros(n_peaks),
+                    'bg_left_idxs': np.zeros(n_peaks, dtype=int),
+                    'bg_right_idxs':np.zeros(n_peaks, dtype=int),
+                    'n_frames':     1,
+                })
+                self._projections_peak_masks.append(np.ones(n_peaks, dtype=bool))
+                self._proj_voltages.append(float(np.mean(volts[mask])))
+                self.voltage_time.append(float(unique_times[pi]))
+            n_total = sum(len(p['freqs']) for p in self._projections_peak_data)
+            print(f"Loaded {len(self._projections_peak_data)} projections ({n_total} peaks) from {csv_path}")
+            return True
+        except Exception as e:
+            print(f"Could not load peaks from CSV: {e}")
+            return False
+
+    def _plot_normalized_areas(self):
+        """Area-ratio AFC resonance fit (AFC_npzmonitor.ipynb approach).
+
+        For each projection, uses the selected reference peak (Ref combo).
+        Builds frequency pairs (f_i, f_ref) with area ratio R = A_i / A_ref and
+        error dR from area_err propagation.  Model:
+
+            R_theory(f1, f2) = |H(f1)|^2 / |H(f2)|^2
+            H(f) = 1 / sqrt(1 + Q^2 * (f/f_sys - f_sys/f)^2)
+
+        Weighted least squares (curve_fit) + MC (5000 iter).
+        """
+        if not self._load_peaks_from_csv():
+            QMessageBox.warning(self, "Warning", "No afc_peaks.csv found -- click Find Peaks first")
             return
 
-        # ── 1) Collect kept (freq, area) pairs per projection ──
-        proj_freqs = []   # list of arrays, one per projection
-        proj_areas = []   # list of arrays, one per projection
-        proj_voltages = []
+        # -- 1) Build (f1, f2, R, dR) pairs per projection --
+        ref_text = self.norm_ref_combo.currentText()
+
+        def _get_ref_idx(areas, mode):
+            if mode == "Ref: 1st peak":
+                return 0
+            elif mode == "Ref: last peak":
+                return len(areas) - 1
+            else:  # "Ref: Max Area"
+                return int(np.argmax(areas))
+
+        f1_list, f2_list, R_list, dR_list = [], [], [], []
+        proj_idx_list = []
 
         for i, pk in enumerate(self._projections_peak_data):
             mask = (self._projections_peak_masks[i]
@@ -1614,228 +1731,305 @@ class AFCCalculatorDialog(QDialog):
                     else np.ones(len(pk['freqs']), dtype=bool))
             kept = mask.astype(bool)
             kept_areas = pk['areas'][kept]
-            kept_means = pk.get('means', pk['freqs'])[kept]
+            kept_areas_err = pk.get('areas_err', np.zeros_like(kept_areas))[kept]
+            kept_freqs = pk.get('means', pk['freqs'])[kept]
 
             if len(kept_areas) < 2:
                 continue
 
-            proj_freqs.append(kept_means)
-            proj_areas.append(kept_areas)
-            vv = (self._proj_voltages[i] if self._proj_voltages is not None
-                  and i < len(self._proj_voltages) else None)
-            proj_voltages.append(vv)
+            ridx = _get_ref_idx(kept_areas, ref_text)
+            A_ref = kept_areas[ridx]
+            A_ref_err = kept_areas_err[ridx]
+            f_ref = kept_freqs[ridx]
 
-        if not proj_areas:
-            QMessageBox.warning(self, "Warning", "No valid projections with ≥2 peaks")
+            for j in range(len(kept_areas)):
+                if j == ridx:
+                    continue
+                R = kept_areas[j] / A_ref
+                dA_i = max(kept_areas_err[j], kept_areas[j] * 0.01)
+                dA_r = max(A_ref_err, A_ref * 0.01)
+                dR = R * np.sqrt((dA_i / kept_areas[j])**2 + (dA_r / A_ref)**2)
+                f1_list.append(kept_freqs[j])
+                f2_list.append(f_ref)
+                R_list.append(R)
+                dR_list.append(dR)
+                proj_idx_list.append(i)
+
+        if len(R_list) < 4:
+            QMessageBox.warning(self, "Warning",
+                                "Not enough peak pairs for fitting (need >= 4)")
             return
 
-        # ── 2) Normalize each projection by its own first or last kept peak area ──
-        norm_ref_index = 0 if self.norm_ref_combo.currentText() == "Norm: 1st peak" else -1
-        all_freqs = []
-        all_norm_areas = []
-        kept_counts = []
+        f1 = np.array(f1_list)
+        f2 = np.array(f2_list)
+        R_exp = np.array(R_list)
+        delta_R = np.array(dR_list)
+        proj_idx_arr = np.array(proj_idx_list)
 
-        for pi in range(len(proj_freqs)):
-            norm = proj_areas[pi] / proj_areas[pi][norm_ref_index]
-            all_freqs.extend(proj_freqs[pi].tolist())
-            all_norm_areas.extend(norm.tolist())
-            kept_counts.append(len(proj_areas[pi]))
-            all_freqs.extend(proj_freqs[pi].tolist())
-            all_norm_areas.extend(norm.tolist())
-            kept_counts.append(len(proj_areas[pi]))
+        # Filter invalid data
+        valid = ~np.isnan(R_exp) & ~np.isinf(R_exp) & (delta_R > 0) & (R_exp > 0)
+        f1 = f1[valid]; f2 = f2[valid]
+        R_exp = R_exp[valid]; delta_R = delta_R[valid]
+        proj_idx_arr = proj_idx_arr[valid]
 
-        arr_f = np.array(all_freqs)
-        arr_a = np.array(all_norm_areas)
-
-        if len(arr_f) < 4:
-            QMessageBox.warning(self, "Warning", "Not enough peaks for fitting (need >= 4)")
+        if len(R_exp) < 4:
+            QMessageBox.warning(self, "Warning",
+                                "Not enough valid pairs after filtering")
             return
 
-        # ── Build dialog with parameter inputs and plot ──
+        # -- 2) Model functions --
+        def _H_resp(f, Q_sys, f_sys):
+            x = f / f_sys
+            return 1.0 / np.sqrt(1.0 + Q_sys**2 * (x - 1.0 / x)**2)
+
+        def _ratio_model(f_pair, Q_sys, f_sys):
+            f1_, f2_ = f_pair
+            return (_H_resp(f1_, Q_sys, f_sys)**2) / (_H_resp(f2_, Q_sys, f_sys)**2)
+
+        # -- 3) Weighted least-squares fit --
+        f_pair = np.vstack([f1, f2])
+        f_sys_guess = np.median(np.concatenate([f1, f2]))
+        p0 = [10000, f_sys_guess]
+        bounds = ((10, f_sys_guess * 0.9), (20000, f_sys_guess * 1.1))
+
+        try:
+            popt, pcov = curve_fit(_ratio_model, f_pair, R_exp,
+                                   p0=p0, sigma=delta_R,
+                                   absolute_sigma=True,
+                                   bounds=bounds, maxfev=10000)
+        except Exception as e:
+            QMessageBox.warning(self, "Fit Error",
+                                f"curve_fit failed:\n{str(e)}")
+            return
+
+        Q_fit, f_sys_fit = popt
+        Q_err = np.sqrt(pcov[0, 0]) if pcov[0, 0] > 0 else 0.0
+        f_sys_err = np.sqrt(pcov[1, 1]) if pcov[1, 1] > 0 else 0.0
+        self._last_res_params = (1.0, Q_fit, f_sys_fit)
+
+        # -- 4) Monte Carlo (5000 iter) --
+        N_MC = 5000
+        rng = np.random.default_rng()
+        Q_samples, f_samples = [], []
+        for _ in range(N_MC):
+            R_sim = R_exp + rng.normal(0, delta_R)
+            R_sim = np.clip(R_sim, 1e-6, None)
+            try:
+                ps, _ = curve_fit(_ratio_model, f_pair, R_sim,
+                                  p0=p0, sigma=delta_R,
+                                  absolute_sigma=True,
+                                  bounds=bounds, maxfev=2000)
+                Q_samples.append(ps[0]); f_samples.append(ps[1])
+            except RuntimeError:
+                continue
+
+        Q_samples = np.array(Q_samples); f_samples = np.array(f_samples)
+        if len(Q_samples) > 0:
+            Q_mu, Q_sigma = np.mean(Q_samples), np.std(Q_samples)
+            f_mu, f_sigma = np.mean(f_samples), np.std(f_samples)
+        else:
+            Q_mu, Q_sigma = Q_fit, Q_err
+            f_mu, f_sigma = f_sys_fit, f_sys_err
+
+        # -- 5) Build result dialog --
         dialog = QDialog(self)
-        dialog.setWindowTitle("Normalized Peak Area vs Frequency")
-        dialog.resize(750, 700)
+        dialog.setWindowTitle("AFC Resonance Fit - Area Ratio Method (MC)")
+        dialog.resize(850, 700)
         layout = QVBoxLayout(dialog)
 
-        # Parameter input row
-        param_layout = QHBoxLayout()
-        param_layout.addWidget(QLabel("A0:"))
-        self._norm_A0_edit = QLineEdit("1.0")
-        self._norm_A0_edit.setMaximumWidth(70)
-        param_layout.addWidget(self._norm_A0_edit)
-        param_layout.addWidget(QLabel("Q:"))
-        self._norm_Q_edit = QLineEdit("10000")
-        self._norm_Q_edit.setMaximumWidth(70)
-        param_layout.addWidget(self._norm_Q_edit)
-        param_layout.addWidget(QLabel("f_sys:"))
-        self._norm_fsys_edit = QLineEdit("310")
-        self._norm_fsys_edit.setMaximumWidth(70)
-        param_layout.addWidget(self._norm_fsys_edit)
+        summary = (f"Least Squares:  Q = {Q_fit:.1f} +/- {Q_err:.1f}"
+                   f"    f_sys = {f_sys_fit:.6f} +/- {f_sys_err:.2e} MHz\n"
+                   f"MC ({len(Q_samples)} iter):  Q = {Q_mu:.1f} +/- {Q_sigma:.1f}"
+                   f"    f_sys = {f_mu:.6f} +/- {f_sigma:.2e} MHz")
+        lbl = QLabel(summary)
+        lbl.setFont(QFont("Consolas", 10))
+        lbl.setStyleSheet("padding: 4px; background: #f5f5f5; border: 1px solid #ccc;")
+        layout.addWidget(lbl)
 
-        fit_btn = QPushButton("Fit & Plot")
-        fit_btn.setStyleSheet("background-color: #2196F3; color: white; border-radius: 3px; padding: 2px 12px;")
-        param_layout.addWidget(fit_btn)
-        param_layout.addStretch()
-        layout.addLayout(param_layout)
-
-        # Matplotlib figure (two subplots)
-        fig = Figure(figsize=(7, 6), dpi=100, constrained_layout=True)
+        fig = Figure(figsize=(8, 6), dpi=100)
         canvas = FigureCanvas(fig)
         toolbar = NavigationToolbar(canvas, dialog)
         layout.addWidget(toolbar)
         layout.addWidget(canvas)
 
-        gs = fig.add_gridspec(2, 1, hspace=0.08, height_ratios=[2, 1])
-        ax_top = fig.add_subplot(gs[0])
-        ax_bot = fig.add_subplot(gs[1])
+        gs = fig.add_gridspec(2, 3, hspace=0.30, wspace=0.35, height_ratios=[2, 1])
+        ax_top = fig.add_subplot(gs[0, :])
+        ax_res = fig.add_subplot(gs[1, 0])
+        ax_mcq = fig.add_subplot(gs[1, 1])
+        ax_mcf = fig.add_subplot(gs[1, 2])
 
-        ax_top.set_yscale('log')
-        ax_top.set_xticklabels([])
-        ax_top.set_ylabel("Normalized Area (log)")
-        ax_top.set_title("")
+        import matplotlib.cm as _cm
+        unique_projs = np.unique(proj_idx_arr)
+        colours = _cm.tab10(np.linspace(0, 1, len(unique_projs)))
+
+        f2_med = np.median(f2)
+        f_grid = np.linspace(f1.min(), f1.max(), 500)
+        R_curve = _ratio_model(np.vstack([f_grid, np.full_like(f_grid, f2_med)]),
+                                Q_fit, f_sys_fit)
+
+        for ci, pi in enumerate(unique_projs):
+            pidx = proj_idx_arr == pi
+            vv = (self._proj_voltages[pi] if self._proj_voltages is not None
+                  and pi < len(self._proj_voltages) else pi)
+            label = (f"{vv:.3f} V" if isinstance(vv, (int, float))
+                     else f"Proj {pi}")
+            ax_top.errorbar(f1[pidx], R_exp[pidx], yerr=delta_R[pidx],
+                            fmt='o', c=colours[ci], ms=4, capsize=2,
+                            label=label, alpha=0.7)
+
+        ax_top.plot(f_grid, R_curve, 'r-', linewidth=1.5)
+        txt = (f"$Q$ = {Q_fit:.0f} $\\pm$ {Q_err:.0f}"
+               f"  [MC: {Q_sigma:.0f}]\n"
+               r"$f_{\rm sys}$" + f" = {f_sys_fit:.6f} $\\pm$ {f_sys_err:.2e}"
+               f"  [MC: {f_sigma:.2e}] MHz\n"
+               f"MC samples: {len(Q_samples)}")
+        ax_top.text(0.97, 0.97, txt, transform=ax_top.transAxes,
+                    fontsize=9, fontfamily='monospace',
+                    verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        ax_top.set_ylabel("Area Ratio $R = A_i / A_{\\rm ref}$")
+        ax_top.set_xlabel("Frequency (MHz)")
+        ax_top.legend(fontsize=7, loc='upper left')
         ax_top.grid(alpha=0.3)
 
-        ax_bot.set_xlabel("Frequency (MHz)")
-        ax_bot.set_ylabel("Residual")
-        ax_bot.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
-        ax_bot.grid(alpha=0.3)
+        # Residuals
+        R_pred = _ratio_model(f_pair, Q_fit, f_sys_fit)
+        resid = R_exp - R_pred
+        for ci, pi in enumerate(unique_projs):
+            pidx = proj_idx_arr == pi
+            ax_res.errorbar(f1[pidx], resid[pidx], yerr=delta_R[pidx],
+                           fmt='o', c=colours[ci], ms=4, capsize=2, alpha=0.7)
+        ax_res.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
+        ax_res.set_xlabel("Frequency (MHz)")
+        ax_res.set_ylabel("Residual")
+        ax_res.grid(alpha=0.3)
 
-        fit_data = {'f': arr_f, 'a': arr_a, 'counts': kept_counts}
+        # Q MC histogram
+        if len(Q_samples) > 1:
+            ax_mcq.hist(Q_samples, bins=30, density=True,
+                        color='skyblue', edgecolor='k')
+            ax_mcq.axvline(Q_mu, color='red', linestyle='dashed', linewidth=1)
+            ax_mcq.set_xlabel("$Q$")
+            ax_mcq.set_ylabel("Density")
+            ax_mcq.set_title(f"MC $Q$: {Q_mu:.0f} $\\pm$ {Q_sigma:.0f}", fontsize=9)
+            ax_mcq.grid(alpha=0.3)
 
-        def _do_fit_and_plot():
-            try:
-                p_A0 = float(self._norm_A0_edit.text())
-                p_Q = float(self._norm_Q_edit.text())
-                p_fs = float(self._norm_fsys_edit.text())
-            except ValueError:
-                QMessageBox.warning(dialog, "Warning", "Invalid parameter value")
-                return
-            try:
-                import ROOT as _R
-                _R.gErrorIgnoreLevel = _R.kWarning + 1
-                n_pts = len(fit_data['f'])
-                x_min = float(fit_data['f'].min())
-                x_max = float(fit_data['f'].max())
+        # f_sys MC histogram
+        if len(f_samples) > 1:
+            ax_mcf.hist(f_samples, bins=30, density=True,
+                        color='salmon', edgecolor='k')
+            ax_mcf.axvline(f_mu, color='red', linestyle='dashed', linewidth=1)
+            ax_mcf.set_xlabel("$f_{\\rm sys}$ (MHz)")
+            ax_mcf.set_ylabel("Density")
+            ax_mcf.set_title(f"MC $f_{{\\rm sys}}$: {f_mu:.6f} $\\pm$ {f_sigma:.2e}", fontsize=9)
+            ax_mcf.grid(alpha=0.3)
 
-                root_func = _R.TF1("resonance",
-                    "[0] / (1.0 + [1]*[1] * (x/[2] - [2]/x)*(x/[2] - [2]/x))",
-                    x_min, x_max)
-                root_func.SetParameter(0, p_A0)
-                root_func.SetParameter(1, p_Q)
-                root_func.SetParameter(2, p_fs)
-                root_func.SetParLimits(0, 0, 1e10)
-                root_func.SetParLimits(1, 0, 1e7)
-                root_func.SetParLimits(2, x_min, x_max)
+        canvas.draw()
 
-                gr = _R.TGraph(n_pts, fit_data['f'], fit_data['a'])
-                gr.Fit("resonance", "QN")
+        # -- 6) Save CSV --
+        csv_path = os.path.join(os.getcwd(), "afc_norm_area.csv")
+        try:
+            with open(csv_path, 'w') as f:
+                f.write("proj_idx,time_s,voltage_V,f1_MHz,f_ref_MHz,"
+                        "area_ratio,delta_ratio,fitted_ratio,residual\n")
+                for ci, pi in enumerate(unique_projs):
+                    pidx = proj_idx_arr == pi
+                    tv = (self.voltage_time[pi] if self.voltage_time is not None
+                          and pi < len(self.voltage_time) else pi)
+                    vv = (self._proj_voltages[pi] if self._proj_voltages is not None
+                          and pi < len(self._proj_voltages) else 0)
+                    for j in np.where(pidx)[0]:
+                        val_fit = _ratio_model(f_pair[:, j:j+1], Q_fit, f_sys_fit)[0]
+                        val_res = R_exp[j] - val_fit
+                        f.write(f"{pi},{tv:.1f},{vv:.3f},"
+                                f"{f1[j]:.8f},{f2[j]:.8f},"
+                                f"{R_exp[j]:.6e},{delta_R[j]:.6e},"
+                                f"{val_fit:.6e},{val_res:.6e}\n")
+            print(f"Normalized area saved to {csv_path}")
+        except Exception as exc:
+            print(f"CSV save error: {exc}")
 
-                A0_f = root_func.GetParameter(0)
-                Q_f = root_func.GetParameter(1)
-                fs_f = root_func.GetParameter(2)
-                self._last_res_params = (A0_f, Q_f, fs_f)
-                perr = [root_func.GetParError(0),
-                        root_func.GetParError(1),
-                        root_func.GetParError(2)]
-                if Q_f <= 0 or fs_f <= 0:
-                    raise RuntimeError("Unphysical fit parameters")
-            except Exception as e:
-                QMessageBox.warning(dialog, "Error", f"Fit failed:\n{str(e)}")
-                return
-
-            ax_top.clear()
-            ax_bot.clear()
-
-            import matplotlib.cm as _cm
-            colors = _cm.tab10(np.linspace(0, 1, len(fit_data['counts'])))
-
-            # ── Compute fit curve over fine grid ──
-            f_grid = np.linspace(fit_data['f'].min(), fit_data['f'].max(), 500)
-            a_fit_grid = self._resonance_func(f_grid, A0_f, Q_f, fs_f)
-
-            # ── Top: scatter data + fit curve ──
-            off = 0
-            for ci in range(len(fit_data['counts'])):
-                end = off + fit_data['counts'][ci]
-                v_label = (f"{proj_voltages[ci]:.3f} V"
-                           if ci < len(proj_voltages) and proj_voltages[ci] is not None
-                           else f"Proj {ci}")
-                ax_top.scatter(fit_data['f'][off:end], fit_data['a'][off:end],
-                               c=[colors[ci]], s=15, label=v_label, alpha=0.7)
-                off = end
-
-            ax_top.plot(f_grid, a_fit_grid, 'r-', linewidth=1.5)
-
-            # Parameter text on top plot
-            txt = (f"$A_0$ = {A0_f:.4e}\n"
-                   f"$Q$ = {Q_f:.0f} ± {perr[1]:.0f}\n"
-                   r"$f_{\rm sys}$" + f" = {fs_f:.6f} ± {perr[2]:.6e} MHz")
-            ax_top.text(0.97, 0.97, txt, transform=ax_top.transAxes,
-                        fontsize=9, fontfamily='monospace',
-                        verticalalignment='top', horizontalalignment='right',
-                        bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-
-            ax_top.set_yscale('log')
-            ax_top.set_xticklabels([])
-            ax_top.set_ylabel("Normalized Area (log)")
-            ax_top.legend(fontsize=7)
-            ax_top.grid(alpha=0.3)
-
-            # ── Bottom: residuals ──
-            a_fit_pts = self._resonance_func(fit_data['f'], A0_f, Q_f, fs_f)
-            resid = fit_data['a'] - a_fit_pts
-
-            off = 0
-            for ci in range(len(fit_data['counts'])):
-                end = off + fit_data['counts'][ci]
-                v_label = (f"{proj_voltages[ci]:.3f} V"
-                           if ci < len(proj_voltages) and proj_voltages[ci] is not None
-                           else f"Proj {ci}")
-                ax_bot.scatter(fit_data['f'][off:end], resid[off:end],
-                               c=[colors[ci]], s=15, label=v_label, alpha=0.7)
-                off = end
-
-            ax_bot.axhline(y=0, color='gray', linestyle='-', linewidth=0.5)
-            ax_bot.set_xlabel("Frequency (MHz)")
-            ax_bot.set_ylabel("Residual")
-            ax_bot.grid(alpha=0.3)
-            canvas.draw()
-
-            # Save CSV
-            csv_path = os.path.join(os.getcwd(), "afc_norm_area.csv")
-            try:
-                with open(csv_path, 'w') as f:
-                    f.write("proj_idx,time_s,voltage_V,freq_MHz,norm_area,fitted_curve,residual\n")
-                    off2 = 0
-                    for ci, pk2 in enumerate(self._projections_peak_data):
-                        kmask = (self._projections_peak_masks[ci]
-                                 if self._projections_peak_masks is not None
-                                 and ci < len(self._projections_peak_masks)
-                                 else np.ones(len(pk2['freqs']), dtype=bool))
-                        kk = kmask.astype(bool)
-                        kmeans = pk2.get('means', pk2['freqs'])[kk]
-                        tv = (self.voltage_time[ci] if self.voltage_time is not None
-                              and ci < len(self.voltage_time) else ci)
-                        vv = (self._proj_voltages[ci] if self._proj_voltages is not None
-                              and ci < len(self._proj_voltages) else 0)
-                        for jj in range(len(kmeans)):
-                            val_fit = self._resonance_func(fit_data['f'][off2], A0_f, Q_f, fs_f)
-                            val_res = fit_data['a'][off2] - val_fit
-                            f.write(f"{ci},{tv:.1f},{vv:.3f},{kmeans[jj]:.6f},"
-                                    f"{fit_data['a'][off2]:.6e},{val_fit:.6e},{val_res:.6e}\n")
-                            off2 += 1
-                print(f"✅ Normalized area saved to {csv_path}")
-            except Exception as e:
-                print(f"⚠️ CSV save error: {e}")
-
-        fit_btn.clicked.connect(_do_fit_and_plot)
-        _do_fit_and_plot()
         dialog.exec_()
+
+    def _load_harmonics_from_csv(self, csv_path=None):
+        """Load peak data with harmonic numbers from afc_harmonics.csv.
+
+        Reconstructs _projections_peak_data with har_n populated.
+        Returns True on success.
+        """
+        if csv_path is None:
+            csv_path = os.path.join(os.getcwd(), "afc_harmonics.csv")
+        if not os.path.exists(csv_path):
+            return False
+        try:
+            raw = np.genfromtxt(csv_path, delimiter=',',
+                                dtype=None, names=True, encoding='utf-8')
+            if raw is None or len(raw) == 0:
+                return False
+            if raw.ndim == 0:
+                raw = np.array([raw])
+
+            proj_idx  = np.array([r['proj_idx']       for r in raw], dtype=int)
+            times     = np.array([r['time_s']          for r in raw], dtype=float)
+            volts     = np.array([r['voltage_V']        for r in raw], dtype=float)
+            har_n     = np.array([r['harmonic_n']       for r in raw], dtype=int)
+            freqs     = np.array([r['freq_MHz']         for r in raw], dtype=float)
+            heights   = np.array([r['height']           for r in raw], dtype=float)
+            fwhms     = np.array([r['FWHM_MHz']         for r in raw], dtype=float)
+            areas     = np.array([r['area']             for r in raw], dtype=float)
+            col_names = raw.dtype.names
+            if 'area_err' in col_names:
+                areas_err = np.array([r['area_err']     for r in raw], dtype=float)
+            else:
+                areas_err = np.zeros_like(areas)
+            means     = np.array([r['mean_freq_MHz']    for r in raw], dtype=float)
+            stds      = np.array([r['std_freq_MHz']     for r in raw], dtype=float)
+            kept_col  = np.array([r['kept']             for r in raw], dtype=int)
+
+            unique_idx = np.unique(proj_idx)
+            self._projections_peak_data = []
+            self._projections_peak_masks = []
+            self._proj_voltages = []
+            self._proj_nframes = []
+            self.voltage_time = []
+
+            for pi in unique_idx:
+                mask = proj_idx == pi
+                n_peaks = int(mask.sum())
+                if n_peaks == 0:
+                    continue
+                self._projections_peak_data.append({
+                    'indices':      np.arange(n_peaks, dtype=int),
+                    'har_n':        har_n[mask].copy(),
+                    'freqs':        freqs[mask].copy(),
+                    'heights':      heights[mask].copy(),
+                    'widths_freq':  fwhms[mask].copy(),
+                    'areas':        areas[mask].copy(),
+                    'areas_err':    areas_err[mask].copy(),
+                    'means':        means[mask].copy(),
+                    'stds':         stds[mask].copy(),
+                    'left_idxs':    np.zeros(n_peaks, dtype=int),
+                    'right_idxs':   np.zeros(n_peaks, dtype=int),
+                    'bg_levels':    np.zeros(n_peaks),
+                    'bg_left_idxs': np.zeros(n_peaks, dtype=int),
+                    'bg_right_idxs':np.zeros(n_peaks, dtype=int),
+                    'n_frames':     1,
+                })
+                self._projections_peak_masks.append(kept_col[mask].astype(bool))
+                self._proj_voltages.append(float(np.mean(volts[mask])))
+                self.voltage_time.append(float(np.mean(times[mask])))
+
+            n_total = sum(len(p['freqs']) for p in self._projections_peak_data)
+            print(f"Loaded {len(self._projections_peak_data)} projections ({n_total} peaks) from {csv_path}")
+            return True
+        except Exception as e:
+            print(f"Could not load harmonics from CSV: {e}")
+            return False
 
     def _plot_harmonic_vs_time(self):
         """Plot raw and resonance-corrected area of a specific harmonic vs time."""
-        if self._projections_peak_data is None or len(self._projections_peak_data) == 0:
-            QMessageBox.warning(self, "Warning", "No peaks found — click Find Peaks first")
+        if not self._load_harmonics_from_csv():
+            QMessageBox.warning(self, "Warning", "No afc_harmonics.csv found -- click Find Peaks + Fit Har first")
             return
 
         try:
@@ -1849,6 +2043,7 @@ class AFCCalculatorDialog(QDialog):
         volts = []
         freqs = []
         raw_areas = []  # net area = area - bg_level
+        raw_areas_err = []  # error on net area
 
         for i, pk in enumerate(self._projections_peak_data):
             har_arr = pk.get('har_n', None)
@@ -1873,17 +2068,21 @@ class AFCCalculatorDialog(QDialog):
 
             freq_val = pk.get('means', pk['freqs'])[match_idx]
             area_val = pk['areas'][match_idx] if match_idx < len(pk['areas']) else 0
+            area_err_val = (pk.get('areas_err', np.zeros(len(pk['areas'])))[match_idx]
+                           if match_idx < len(pk.get('areas_err', [])) else 0)
             bg_val = (pk['bg_levels'][match_idx] if 'bg_levels' in pk and match_idx < len(pk['bg_levels'])
                       else 0)
             net_area = area_val - bg_val
             # Divide by frames to match the A/f shown on projection plots
             nfr = int(self._proj_nframes[i]) if self._proj_nframes is not None and i < len(self._proj_nframes) else 1
             net_area /= max(1, nfr)
+            net_area_err = area_err_val / max(1, nfr)
 
             times.append(float(tv))
             volts.append(float(vv))
             freqs.append(float(freq_val))
             raw_areas.append(float(net_area))
+            raw_areas_err.append(float(net_area_err))
 
         if len(raw_areas) < 3:
             QMessageBox.warning(self, "Warning", f"Not enough projections with harmonic #{target_har} (need ≥3, got {len(raw_areas)})")
@@ -1891,6 +2090,7 @@ class AFCCalculatorDialog(QDialog):
 
         arr_t = np.array(times)
         arr_a = np.array(raw_areas)
+        arr_a_err = np.array(raw_areas_err)
         arr_f = np.array(freqs)
 
         # Build dialog with resonance params + plot
@@ -1949,60 +2149,60 @@ class AFCCalculatorDialog(QDialog):
                 return
 
             ax.clear()
-            # Raw area (blue)
-            ax.scatter(arr_t, arr_a, c='#2196F3', s=25, label='Raw (net)', zorder=3)
+            # Raw area (blue) with error bars
+            ax.errorbar(arr_t, arr_a, yerr=arr_a_err, fmt='o',
+                       c='#2196F3', ms=4, capsize=2, label='Raw (net)', zorder=3)
             ax.plot(arr_t, arr_a, color='#2196F3', linewidth=0.8, alpha=0.5)
 
             # Corrected area = raw / R(freq)
-            corr_a = arr_a / np.maximum(self._resonance_func(arr_f, p_A0, p_Q, p_fs), 1e-30)
+            r_factor = np.maximum(self._resonance_func(arr_f, p_A0, p_Q, p_fs), 1e-30)
+            corr_a = arr_a / r_factor
+            corr_a_err = arr_a_err / r_factor
             # Normalize so the first point = 1
-            corr_a = corr_a / corr_a[0]
-            ax.scatter(arr_t, corr_a, c='#E91E63', s=25, marker='s', label='Corrected (norm)', zorder=3)
+            norm0 = corr_a[0]
+            corr_a = corr_a / norm0
+            corr_a_err = corr_a_err / norm0
+            ax.errorbar(arr_t, corr_a, yerr=corr_a_err, fmt='s',
+                       c='#E91E63', ms=4, capsize=2, label='Corrected (norm)', zorder=3)
             ax.plot(arr_t, corr_a, color='#E91E63', linewidth=0.8, alpha=0.5)
 
-            # ── ROOT TF1 single-parameter exponential decay: A(t) = exp(-λ*t) ──
+            # Weighted exponential decay fit with scipy
             try:
-                import ROOT as _R
-                _R.gErrorIgnoreLevel = _R.kWarning + 1
-                n_pts = len(arr_t)
-                # Shift time so the first point is at t=0
+                from scipy.optimize import curve_fit as _cf
                 t0 = float(arr_t[0])
                 t_shifted = arr_t - t0
-                t_s_min, t_s_max = float(t_shifted.min()), float(t_shifted.max())
-
-                exp_func = _R.TF1("decay", "exp(-[0] * x)", t_s_min, t_s_max)
-                exp_func.SetParameter(0, 0.01)
-                exp_func.SetParLimits(0, 1e-10, 1e3)
-
-                gr = _R.TGraph(n_pts, t_shifted, corr_a)
-                gr.Fit("decay", "QN")
-
-                lam = exp_func.GetParameter(0)
-                lam_err = exp_func.GetParError(0)
+                w_err = np.maximum(corr_a_err, corr_a * 0.001)
+                popt_e, pcov_e = _cf(
+                    lambda t, lam: np.exp(-lam * t),
+                    t_shifted, corr_a,
+                    sigma=w_err, absolute_sigma=True,
+                    p0=[0.01], bounds=([1e-10], [1e3]),
+                    maxfev=10000
+                )
+                lam = float(popt_e[0])
+                lam_err = float(np.sqrt(pcov_e[0, 0])) if pcov_e[0, 0] > 0 else 0
                 half_life = np.log(2) / lam if lam > 0 else float('inf')
                 half_life_err = half_life * (lam_err / lam) if lam > 0 else 0
 
-                t_fine = np.linspace(t_s_min, t_s_max, 300)
+                t_fine = np.linspace(t_shifted.min(), t_shifted.max(), 300)
                 a_fit_exp = np.exp(-lam * t_fine)
-                ax.plot(t_fine + t0, a_fit_exp, 'g-', linewidth=1.8, label='Exp fit', zorder=4)
+                ax.plot(t_fine + t0, a_fit_exp, 'g-', linewidth=1.8, label='Exp fit (weighted)', zorder=4)
 
-                # Parameter text on plot
-                txt = (f"$\\lambda = {lam:.4e} \\pm {lam_err:.4e}$ s$^{{-1}}$\n"
-                       f"$T_{{1/2}} = {half_life:.2f} \\pm {half_life_err:.2f}$ s")
+                txt = (f"\(\lambda = {lam:.4e} \pm {lam_err:.4e}\$) s$^{{-1}}$"
+                       f" {{1/2}} = {half_life:.2f} \pm {half_life_err:.2f}$ s")
                 ax.text(0.97, 0.97, txt, transform=ax.transAxes,
                         fontsize=9, fontfamily='monospace',
                         verticalalignment='top', horizontalalignment='right',
                         bbox=dict(boxstyle='round', facecolor='#E8F5E9', alpha=0.85))
             except Exception as e:
-                print(f"⚠️ Exponential fit skipped: {e}")
+                print(f"Warning: Weighted exponential fit skipped: {e}")
 
             ax.set_xlabel("Time (s)")
             ax.set_ylabel("Net Area")
-            ax.set_title(f"Harmonic #{target_har}: Raw & Corrected Area vs Time")
-            leg = ax.legend(fontsize=8)
+            ax.set_title(f"Harmonic #{target_har}: Raw \& Corrected Area vs Time")
+            ax.legend(fontsize=8)
             ax.grid(alpha=0.3)
             canvas.draw()
-
         update_btn.clicked.connect(_redraw)
         _redraw()
         dialog.exec_()
@@ -2016,8 +2216,8 @@ class AFCCalculatorDialog(QDialog):
         Converges when Q / f_sys stabilise.
         After convergence, fit decay curve for the target harmonic.
         """
-        if self._projections_peak_data is None or len(self._projections_peak_data) == 0:
-            QMessageBox.warning(self, "Warning", "No peaks found — click Find Peaks first")
+        if not self._load_peaks_from_csv():
+            QMessageBox.warning(self, "Warning", "No afc_peaks.csv found — click Find Peaks first")
             return
 
         try:
@@ -2052,12 +2252,17 @@ class AFCCalculatorDialog(QDialog):
             return
 
         # Normalize within each projection
-        norm_ref_index = 0 if self.norm_ref_combo.currentText() == "Norm: 1st peak" else -1
+        def _ref_idx_ri(areas):
+            mode = self.norm_ref_combo.currentText()
+            if mode == "Ref: 1st peak": return 0
+            elif mode == "Ref: last peak": return len(areas) - 1
+            else: return int(np.argmax(areas))
+
         all_freqs_raw = []
         all_areas_norm = []
         kept_counts = []
         for pi in range(len(proj_freqs)):
-            norm = proj_areas[pi] / proj_areas[pi][norm_ref_index]
+            norm = proj_areas[pi] / proj_areas[pi][_ref_idx_ri(proj_areas[pi])]
             all_freqs_raw.extend(proj_freqs[pi].tolist())
             all_areas_norm.extend(norm.tolist())
             kept_counts.append(len(proj_areas[pi]))
@@ -2068,7 +2273,7 @@ class AFCCalculatorDialog(QDialog):
             QMessageBox.warning(self, "Warning", "Not enough peaks for fitting (need ≥4)")
             return
 
-        f_ref = float(proj_freqs[0][norm_ref_index])  # first projection, reference peak
+        f_ref = float(proj_freqs[0][_ref_idx_ri(proj_areas[0])])  # first projection, reference peak
 
         # ── Collect target-harmonic data for decay fitting ──
         har_times, har_freqs, har_raw = [], [], []
@@ -2140,11 +2345,16 @@ class AFCCalculatorDialog(QDialog):
         # ── Helper: apply AF correction to normalized areas ──
         def _apply_af(fit_A0, fit_Q, fit_fs):
             af_ref = max(self._resonance_func(f_ref, fit_A0, fit_Q, fit_fs), 1e-30)
+            def __ref_idx(areas, mode):
+                if mode == "Ref: 1st peak": return 0
+                elif mode == "Ref: last peak": return len(areas) - 1
+                else: return int(np.argmax(areas))
+            ref_mode = self.norm_ref_combo.currentText()
             out = []
             for pi in range(len(proj_freqs)):
-                # Normalize first (same as lines 1890-1891)
-                norm_area = proj_areas[pi] / proj_areas[pi][norm_ref_index]
-                f_first = float(proj_freqs[pi][norm_ref_index])
+                ridx = __ref_idx(proj_areas[pi], ref_mode)
+                norm_area = proj_areas[pi] / proj_areas[pi][ridx]
+                f_first = float(proj_freqs[pi][ridx])
                 af_i = max(self._resonance_func(f_first, fit_A0, fit_Q, fit_fs), 1e-30)
                 out.extend((norm_area * (af_i / af_ref)).tolist())
             return np.array(out)
@@ -2316,7 +2526,7 @@ class AFCCalculatorDialog(QDialog):
         try:
             with open(csv_path, 'w') as fh:
                 fh.write("proj_idx,time_s,voltage_V,harmonic_n,"
-                         "freq_MHz,height,FWHM_MHz,area,mean_freq_MHz,std_freq_MHz,"
+                         "freq_MHz,height,FWHM_MHz,area,area_err,mean_freq_MHz,std_freq_MHz,"
                          "f0_fit_MHz,offset_fit_MHz,residual_MHz,kept\n")
 
                 for i, pk in enumerate(self._projections_peak_data):
@@ -2340,9 +2550,10 @@ class AFCCalculatorDialog(QDialog):
                             area_j = pk['areas'][j] if j < len(pk['areas']) else 0
                             mean_j = pk['means'][j] if j < len(pk['means']) else 0
                             std_j = pk['stds'][j] if j < len(pk['stds']) else 0
+                            ae_j = pk.get('areas_err', [0])[j] if j < len(pk.get('areas_err', [])) else 0
                             fh.write(f"{i},{tv:.1f},{vv:.3f},{hn},{pk['freqs'][j]:.6f},"
                                      f"{pk['heights'][j]:.6e},{pk['widths_freq'][j]:.6f},"
-                                     f"{area_j:.6e},{mean_j:.6e},{std_j:.6e},,,,,{kw}\n")
+                                     f"{area_j:.6e},{ae_j:.6e},{mean_j:.6e},{std_j:.6e},,,,,{kw}\n")
                         continue
 
                     # Sort kept peaks by frequency
@@ -2406,6 +2617,7 @@ class AFCCalculatorDialog(QDialog):
                     pk['har_n'] = har_arr
 
                     for j in range(len(pk['freqs'])):
+                        ae_j = pk.get('areas_err', [0])[j] if j < len(pk.get('areas_err', [])) else 0
                         if kept_mask[j]:
                             hn = orig_to_har.get(j, 0)
                             resid = orig_to_resid.get(j, 0.0)
@@ -2414,7 +2626,7 @@ class AFCCalculatorDialog(QDialog):
                             std_j = pk['stds'][j] if j < len(pk['stds']) else 0
                             fh.write(f"{i},{tv:.1f},{vv:.3f},{hn},{pk['freqs'][j]:.6f},"
                                      f"{pk['heights'][j]:.6e},{pk['widths_freq'][j]:.6f},"
-                                     f"{area_j:.6e},{mean_j:.6e},{std_j:.6e},"
+                                     f"{area_j:.6e},{ae_j:.6e},{mean_j:.6e},{std_j:.6e},"
                                      f"{f0:.6f},{offset:.6e},{resid:.6e},1\n")
                         else:
                             area_j = pk['areas'][j] if j < len(pk['areas']) else 0
@@ -2422,7 +2634,7 @@ class AFCCalculatorDialog(QDialog):
                             std_j = pk['stds'][j] if j < len(pk['stds']) else 0
                             fh.write(f"{i},{tv:.1f},{vv:.3f},0,{pk['freqs'][j]:.6f},"
                                      f"{pk['heights'][j]:.6e},{pk['widths_freq'][j]:.6f},"
-                                     f"{area_j:.6e},{mean_j:.6e},{std_j:.6e},,,,,0\n")
+                                     f"{area_j:.6e},{ae_j:.6e},{mean_j:.6e},{std_j:.6e},,,,,0\n")
 
                     # Summary comment line
                     fh.write(f"# Proj {i}: f0={f0:.6f} MHz, offset={offset:.6e} MHz, "
