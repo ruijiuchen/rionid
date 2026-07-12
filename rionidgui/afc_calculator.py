@@ -2109,24 +2109,18 @@ class AFCCalculatorDialog(QDialog):
         dialog.resize(700, 500)
         layout = QVBoxLayout(dialog)
 
-        # Parameter row: A0, Q, f_sys inputs
+        # Parameter row: Q, f_sys inputs (H(f) model, no A0)
         param_layout = QHBoxLayout()
-        param_layout.addWidget(QLabel("A0:"))
-        a0_edit = QLineEdit()
         q_edit = QLineEdit()
         fs_edit = QLineEdit()
-        a0_edit.setMaximumWidth(70)
         q_edit.setMaximumWidth(70)
         fs_edit.setMaximumWidth(70)
         if self._last_res_params is not None:
-            a0_edit.setText(f"{self._last_res_params[0]:.6e}")
             q_edit.setText(f"{self._last_res_params[1]:.0f}")
             fs_edit.setText(f"{self._last_res_params[2]:.6f}")
         else:
-            a0_edit.setText("1.0")
             q_edit.setText("10000")
             fs_edit.setText("310")
-        param_layout.addWidget(a0_edit)
         param_layout.addWidget(QLabel("Q:"))
         param_layout.addWidget(q_edit)
         param_layout.addWidget(QLabel("f_sys:"))
@@ -2152,7 +2146,6 @@ class AFCCalculatorDialog(QDialog):
 
         def _redraw():
             try:
-                p_A0 = float(a0_edit.text())
                 p_Q = float(q_edit.text())
                 p_fs = float(fs_edit.text())
             except ValueError:
@@ -2164,16 +2157,13 @@ class AFCCalculatorDialog(QDialog):
                        c='#2196F3', ms=4, capsize=2, label='Raw (net)', zorder=3)
             ax.plot(arr_t, arr_a, color='#2196F3', linewidth=0.8, alpha=0.5)
 
-            # Corrected area = raw / R(freq)
-            r_factor = np.maximum(self._resonance_func(arr_f, p_A0, p_Q, p_fs), 1e-30)
+            # Corrected area = net area / H(freq)  (AFC correction, no normalization)
+            def _H_avt(f): return 1.0 / np.sqrt(1.0 + p_Q**2 * (f/p_fs - p_fs/f)**2)
+            r_factor = np.maximum(_H_avt(arr_f), 1e-30)
             corr_a = arr_a / r_factor
             corr_a_err = arr_a_err / r_factor
-            # Normalize so the first point = 1
-            norm0 = corr_a[0]
-            corr_a = corr_a / norm0
-            corr_a_err = corr_a_err / norm0
             ax.errorbar(arr_t, corr_a, yerr=corr_a_err, fmt='s',
-                       c='#E91E63', ms=4, capsize=2, label='Corrected (norm)', zorder=3)
+                       c='#E91E63', ms=4, capsize=2, label='Corrected (AFC)', zorder=3)
             ax.plot(arr_t, corr_a, color='#E91E63', linewidth=0.8, alpha=0.5)
 
             # Weighted exponential decay fit with scipy
@@ -2183,23 +2173,25 @@ class AFCCalculatorDialog(QDialog):
                 t_shifted = arr_t - t0
                 w_err = np.maximum(corr_a_err, corr_a * 0.001)
                 popt_e, pcov_e = _cf(
-                    lambda t, lam: np.exp(-lam * t),
+                    lambda t, A0, lam: A0 * np.exp(-lam * t),
                     t_shifted, corr_a,
                     sigma=w_err, absolute_sigma=True,
-                    p0=[0.01], bounds=([1e-10], [1e3]),
+                    p0=[corr_a[0], 0.01],
                     maxfev=10000
                 )
-                lam = float(popt_e[0])
-                lam_err = float(np.sqrt(pcov_e[0, 0])) if pcov_e[0, 0] > 0 else 0
+                A0_fit = float(popt_e[0])
+                lam = float(popt_e[1])
+                lam_err = float(np.sqrt(pcov_e[1, 1])) if pcov_e[1, 1] > 0 else 0
                 half_life = np.log(2) / lam if lam > 0 else float('inf')
                 half_life_err = half_life * (lam_err / lam) if lam > 0 else 0
 
                 t_fine = np.linspace(t_shifted.min(), t_shifted.max(), 300)
-                a_fit_exp = np.exp(-lam * t_fine)
+                a_fit_exp = A0_fit * np.exp(-lam * t_fine)
                 ax.plot(t_fine + t0, a_fit_exp, 'g-', linewidth=1.8, label='Exp fit (weighted)', zorder=4)
 
-                txt = (f"\(\lambda = {lam:.4e} \pm {lam_err:.4e}\$) s$^{{-1}}$"
-                       f" {{1/2}} = {half_life:.2f} \pm {half_life_err:.2f}$ s")
+                txt = (f"$A_0$ = {A0_fit:.4e}   "
+                       f"$\lambda$ = {lam:.4e} $\pm$ {lam_err:.4e} s$^{{-1}}$   "
+                       f"$T_{{1/2}}$ = {half_life:.2f} $\pm$ {half_life_err:.2f} s")
                 ax.text(0.97, 0.97, txt, transform=ax.transAxes,
                         fontsize=9, fontfamily='monospace',
                         verticalalignment='top', horizontalalignment='right',
