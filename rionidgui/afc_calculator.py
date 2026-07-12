@@ -1722,6 +1722,7 @@ class AFCCalculatorDialog(QDialog):
                 return int(np.argmax(areas))
 
         f1_list, f2_list, R_list, dR_list = [], [], [], []
+        A1_list, A1_err_list, Aref_list, Aref_err_list = [], [], [], []
         proj_idx_list = []
 
         for i, pk in enumerate(self._projections_peak_data):
@@ -1753,6 +1754,8 @@ class AFCCalculatorDialog(QDialog):
                 f2_list.append(f_ref)
                 R_list.append(R)
                 dR_list.append(dR)
+                A1_list.append(kept_areas[j]); A1_err_list.append(dA_i)
+                Aref_list.append(A_ref); Aref_err_list.append(dA_r)
                 proj_idx_list.append(i)
 
         if len(R_list) < 4:
@@ -1764,12 +1767,16 @@ class AFCCalculatorDialog(QDialog):
         f2 = np.array(f2_list)
         R_exp = np.array(R_list)
         delta_R = np.array(dR_list)
+        A1_exp = np.array(A1_list); A1_err_exp = np.array(A1_err_list)
+        Aref_exp = np.array(Aref_list); Aref_err_exp = np.array(Aref_err_list)
         proj_idx_arr = np.array(proj_idx_list)
 
         # Filter invalid data
         valid = ~np.isnan(R_exp) & ~np.isinf(R_exp) & (delta_R > 0) & (R_exp > 0)
         f1 = f1[valid]; f2 = f2[valid]
         R_exp = R_exp[valid]; delta_R = delta_R[valid]
+        A1_exp = A1_exp[valid]; A1_err_exp = A1_err_exp[valid]
+        Aref_exp = Aref_exp[valid]; Aref_err_exp = Aref_err_exp[valid]
         proj_idx_arr = proj_idx_arr[valid]
 
         if len(R_exp) < 4:
@@ -1931,6 +1938,7 @@ class AFCCalculatorDialog(QDialog):
         try:
             with open(csv_path, 'w') as f:
                 f.write("proj_idx,time_s,voltage_V,f1_MHz,f_ref_MHz,"
+                        "area1,area1_err,area_ref,area_ref_err,"
                         "area_ratio,delta_ratio,fitted_ratio,residual\n")
                 for ci, pi in enumerate(unique_projs):
                     pidx = proj_idx_arr == pi
@@ -1943,6 +1951,8 @@ class AFCCalculatorDialog(QDialog):
                         val_res = R_exp[j] - val_fit
                         f.write(f"{pi},{tv:.1f},{vv:.3f},"
                                 f"{f1[j]:.8f},{f2[j]:.8f},"
+                                f"{A1_exp[j]:.6e},{A1_err_exp[j]:.6e},"
+                                f"{Aref_exp[j]:.6e},{Aref_err_exp[j]:.6e},"
                                 f"{R_exp[j]:.6e},{delta_R[j]:.6e},"
                                 f"{val_fit:.6e},{val_res:.6e}\n")
             print(f"Normalized area saved to {csv_path}")
@@ -2216,9 +2226,10 @@ class AFCCalculatorDialog(QDialog):
         Converges when Q / f_sys stabilise.
         After convergence, fit decay curve for the target harmonic.
         """
-        if not self._load_peaks_from_csv():
-            QMessageBox.warning(self, "Warning", "No afc_peaks.csv found — click Find Peaks first")
-            return
+        if not self._load_harmonics_from_csv():
+            if not self._load_peaks_from_csv():
+                QMessageBox.warning(self, "Warning", "No afc_peaks.csv found — click Find Peaks first")
+                return
 
         try:
             target_har = int(self.har_vs_time_edit.text())
